@@ -37,6 +37,8 @@ public:
                  QString tagsCsv) override;
     QString listPublishedJson() override;
     void startBroadcaster() override;
+    void refreshPublishedList() override;
+    void clearHistory() override;
 
 signals:
     void eventResponse(const QString& eventName, const QVariantList& args);
@@ -53,6 +55,8 @@ private:
     LogosAPI*       m_logosAPI = nullptr;
     LogosAPIClient* m_chronicleClient = nullptr;
     QTimer*         m_pollTimer = nullptr;
+    QTimer*         m_startBroadcasterRetryTimer = nullptr;
+    int             m_startBroadcasterAttempts = 0;
 };
 
 #endif // WHISTLEBLOWER_PLUGIN_H

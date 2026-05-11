@@ -1,9 +1,12 @@
 #include "whistleblower_plugin.h"
 
 #include <QDebug>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMimeDatabase>
+#include <QMimeType>
 #include <QStringList>
 #include <QTimer>
 
@@ -13,6 +16,9 @@
 
 namespace {
 constexpr int POLL_INTERVAL_MS = 1000;
+constexpr int MAX_BROADCASTER_RETRIES = 5;
+constexpr int BROADCASTER_RETRY_BASE_MS = 2000;  // 2s, 4s, 8s, 16s, 30s (capped)
+constexpr int BROADCASTER_RETRY_CAP_MS = 30000;
 
 QString compactJson(const QJsonObject& obj) {
     return QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
@@ -47,11 +53,20 @@ void WhistleblowerPlugin::initLogos(LogosAPI* api) {
     connect(m_pollTimer, &QTimer::timeout,
             this, &WhistleblowerPlugin::pollPublishStatus);
 
+    m_startBroadcasterRetryTimer = new QTimer(this);
+    m_startBroadcasterRetryTimer->setSingleShot(true);
+    connect(m_startBroadcasterRetryTimer, &QTimer::timeout,
+            this, &WhistleblowerPlugin::startBroadcaster);
+
     ensureChronicleClient();
 
-    // Pre-warm Chronicle's delivery node synchronously from the UI host main
-    // thread. Required because Chronicle's lazy delivery init fails when first
-    // triggered from an internal async timer callback.
+    // Show local publish history immediately — chronicle's ledger read does
+    // not depend on storage or delivery being initialised.
+    QTimer::singleShot(0, this, [this]() { refreshPublishedList(); });
+
+    // Pre-warm Chronicle's delivery+storage services. First attempt usually
+    // races with delivery_module's slow Waku-node bring-up; startBroadcaster
+    // self-retries with backoff if it fails.
     QTimer::singleShot(0, this, [this]() { startBroadcaster(); });
 
     qDebug() << "WhistleblowerPlugin: initialized";
@@ -107,12 +122,69 @@ void WhistleblowerPlugin::startBroadcaster() {
     const QJsonObject obj = parseObject(resp);
     const bool ok = obj.value(QStringLiteral("ok")).toBool();
     setDeliveryReady(ok);
-    if (!ok) {
-        const QString err = obj.value(QStringLiteral("error")).toString();
-        qWarning() << "WhistleblowerPlugin: startBroadcaster failed:" << err << "raw:" << resp;
-    } else {
+
+    if (ok) {
+        m_startBroadcasterAttempts = 0;
         qDebug() << "WhistleblowerPlugin: chronicle broadcaster ready";
+        // Refresh history once services come up — in case the ledger was
+        // updated externally while we were waiting.
+        refreshPublishedList();
+        return;
     }
+
+    const QString err = obj.value(QStringLiteral("error")).toString();
+    m_startBroadcasterAttempts++;
+    qWarning() << "WhistleblowerPlugin: startBroadcaster attempt"
+               << m_startBroadcasterAttempts << "failed:" << err;
+
+    if (m_startBroadcasterAttempts < MAX_BROADCASTER_RETRIES) {
+        const int delay = std::min(
+            BROADCASTER_RETRY_BASE_MS * (1 << (m_startBroadcasterAttempts - 1)),
+            BROADCASTER_RETRY_CAP_MS);
+        qDebug() << "WhistleblowerPlugin: retrying startBroadcaster in"
+                 << delay << "ms";
+        m_startBroadcasterRetryTimer->start(delay);
+    } else {
+        qWarning() << "WhistleblowerPlugin: giving up on startBroadcaster after"
+                   << m_startBroadcasterAttempts << "attempts";
+        setLastError(QStringLiteral("Could not initialise chronicle services: %1")
+                         .arg(err));
+    }
+}
+
+void WhistleblowerPlugin::refreshPublishedList() {
+    const QString resp = callChronicle(QStringLiteral("listPublishedJson"));
+    const QJsonObject obj = parseObject(resp);
+    if (!obj.value(QStringLiteral("ok")).toBool()) {
+        return;
+    }
+    const QJsonArray records = obj.value(QStringLiteral("records")).toArray();
+    setPublishedRecordsJson(QString::fromUtf8(
+        QJsonDocument(records).toJson(QJsonDocument::Compact)));
+}
+
+void WhistleblowerPlugin::clearHistory() {
+    if (busy()) {
+        setLastError(QStringLiteral("cannot clear while a publish is in progress"));
+        return;
+    }
+    const QString resp = callChronicle(QStringLiteral("clearPublishedJson"));
+    const QJsonObject obj = parseObject(resp);
+    if (!obj.value(QStringLiteral("ok")).toBool()) {
+        const QString code  = obj.value(QStringLiteral("code")).toString();
+        const QString error = obj.value(QStringLiteral("error")).toString();
+        setLastError(code.isEmpty() ? error
+                                    : QStringLiteral("%1: %2").arg(code, error));
+        return;
+    }
+    // Clear the status panel too — last-publish details would be misleading
+    // once the underlying records are gone.
+    setStatus(QStringLiteral("idle"));
+    setCid(QString());
+    setMetadataHash(QString());
+    setCurrentPublishId(QString());
+    setLastError(QString());
+    refreshPublishedList();
 }
 
 void WhistleblowerPlugin::resetPublishState() {
@@ -140,12 +212,21 @@ void WhistleblowerPlugin::publish(QString path,
         }
     }
 
+    QString resolvedContentType = contentType.trimmed();
+    if (resolvedContentType.isEmpty()) {
+        // Detect via Qt's MIME database — checks extension AND sniffs the file
+        // header, falls back to application/octet-stream.
+        QMimeDatabase db;
+        const QMimeType mt = db.mimeTypeForFile(
+            QFileInfo(path), QMimeDatabase::MatchDefault);
+        resolvedContentType = mt.isValid()
+            ? mt.name()
+            : QStringLiteral("application/octet-stream");
+    }
+
     QJsonObject req;
     req.insert(QStringLiteral("path"), path);
-    req.insert(QStringLiteral("content_type"),
-               contentType.trimmed().isEmpty()
-                   ? QStringLiteral("application/octet-stream")
-                   : contentType);
+    req.insert(QStringLiteral("content_type"), resolvedContentType);
     req.insert(QStringLiteral("title"), title);
     req.insert(QStringLiteral("description"), description);
     req.insert(QStringLiteral("tags"), tagsArr);
@@ -217,6 +298,9 @@ void WhistleblowerPlugin::pollPublishStatus() {
             setLastError(code.isEmpty() ? error
                                         : QStringLiteral("%1: %2").arg(code, error));
         }
+        // History changed (either a new broadcast_sent record landed, or an
+        // error record was persisted). Push the latest list to the UI.
+        refreshPublishedList();
     }
 }
 

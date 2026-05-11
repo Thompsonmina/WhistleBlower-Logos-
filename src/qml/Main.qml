@@ -3,23 +3,47 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 
-Item {
-    id: root
+import "components" as Comp
 
+// Whistleblower main screen. Root is a Rectangle so the app paints its own
+// canvas with the Theme's bg color instead of inheriting the host's window
+// chrome colour.
+Rectangle {
+    id: root
+    color: theme.bg
+
+    // ── Backend wiring ───────────────────────────────────────────────────────
     readonly property var backend: logos.module("whistleblower")
-    readonly property bool ready: backend !== null && logos.isViewModuleReady("whistleblower")
+    readonly property bool connected: backend !== null && backend.state === 2
     readonly property string status: backend ? backend.status : ""
     readonly property bool busy: backend ? backend.busy : false
     readonly property string cid: backend ? backend.cid : ""
     readonly property string metadataHash: backend ? backend.metadataHash : ""
     readonly property string lastError: backend ? backend.lastError : ""
     readonly property bool deliveryReady: backend ? backend.deliveryReady : false
+    readonly property string publishedRecordsJson: backend ? backend.publishedRecordsJson : ""
 
-    function statusColor(s) {
-        if (s === "broadcast_sent") return "#56d364"
-        if (s === "error") return "#f85149"
-        if (s === "idle" || s === "") return "#8b949e"
-        return "#d29922"  // in-flight states
+    readonly property var publishedRecords: {
+        if (!publishedRecordsJson) return []
+        try { return JSON.parse(publishedRecordsJson) } catch (e) { return [] }
+    }
+
+    Theme { id: theme }
+
+    function connectionPillTone() {
+        if (!connected || !deliveryReady) return "warning"
+        return "success"
+    }
+    function connectionPillText() {
+        if (!connected)     return "Connecting…"
+        if (!deliveryReady) return "Delivery offline"
+        return "Connected"
+    }
+    function statusPillTone(s) {
+        if (s === "broadcast_sent")  return "success"
+        if (s === "error")           return "danger"
+        if (s === "idle" || s === "") return "neutral"
+        return "warning"
     }
 
     FileDialog {
@@ -32,138 +56,172 @@ Item {
         }
     }
 
+    MessageDialog {
+        id: clearConfirm
+        title: "Clear publish history?"
+        text: "Remove all " + root.publishedRecords.length +
+              " local publish record(s)? Files already uploaded to Storage and " +
+              "broadcasts already sent will not be rolled back."
+        buttons: MessageDialog.Yes | MessageDialog.Cancel
+        onAccepted: backend.clearHistory()
+    }
+
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 24
-        spacing: 14
+        anchors.margins: theme.s5
+        spacing: theme.s4
 
-        Text {
-            text: "Whistleblower — Publish a Document"
-            font.pixelSize: 20
-            color: "#ffffff"
-            Layout.alignment: Qt.AlignHCenter
-        }
-
+        // ── Header ───────────────────────────────────────────────────────────
         RowLayout {
-            spacing: 12
             Layout.fillWidth: true
-
-            Text {
-                text: root.ready ? (root.deliveryReady ? "Connected · Delivery ready"
-                                                       : "Connected · Delivery not ready")
-                                 : "Connecting to backend..."
-                color: root.ready && root.deliveryReady ? "#56d364" : "#f0883e"
-                font.pixelSize: 12
-            }
-        }
-
-        // ── Form ──────────────────────────────────────────────────────────
-        GridLayout {
-            columns: 2
-            columnSpacing: 12
-            rowSpacing: 8
-            Layout.fillWidth: true
-
-            Text { text: "File path"; color: "#c9d1d9"; font.pixelSize: 13 }
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
-                TextField {
-                    id: pathField
-                    Layout.fillWidth: true
-                    placeholderText: "/absolute/path/to/file"
-                    enabled: !root.busy
-                }
-                Button {
-                    text: "Browse…"
-                    enabled: !root.busy
-                    onClicked: filePicker.open()
-                }
-            }
-
-            Text { text: "Title"; color: "#c9d1d9"; font.pixelSize: 13 }
-            TextField {
-                id: titleField
-                Layout.fillWidth: true
-                placeholderText: "Public title"
-                enabled: !root.busy
-            }
-
-            Text { text: "Content type"; color: "#c9d1d9"; font.pixelSize: 13 }
-            TextField {
-                id: contentTypeField
-                Layout.fillWidth: true
-                placeholderText: "application/pdf  (default: application/octet-stream)"
-                enabled: !root.busy
-            }
-
-            Text { text: "Description"; color: "#c9d1d9"; font.pixelSize: 13 }
-            TextField {
-                id: descField
-                Layout.fillWidth: true
-                placeholderText: "(optional)"
-                enabled: !root.busy
-            }
-
-            Text { text: "Tags (csv)"; color: "#c9d1d9"; font.pixelSize: 13 }
-            TextField {
-                id: tagsField
-                Layout.fillWidth: true
-                placeholderText: "evidence, internal, draft"
-                enabled: !root.busy
-            }
-        }
-
-        RowLayout {
-            Layout.alignment: Qt.AlignHCenter
-            spacing: 12
-
-            Button {
-                text: root.busy ? "Publishing…" : "Publish"
-                enabled: root.ready && !root.busy && pathField.text.length > 0
-                                                  && titleField.text.length > 0
-                onClicked: {
-                    logos.watch(backend.publish(
-                        pathField.text,
-                        contentTypeField.text,
-                        titleField.text,
-                        descField.text,
-                        tagsField.text
-                    ), function() {}, function(err) {
-                        console.warn("publish call failed:", err)
-                    })
-                }
-            }
-
-            Button {
-                text: "Refresh"
-                enabled: root.ready && !root.busy
-                onClicked: backend.startBroadcaster()
-            }
-        }
-
-        // ── Status panel ──────────────────────────────────────────────────
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: statusLayout.implicitHeight + 24
-            color: "#161b22"
-            radius: 6
-            border.color: "#30363d"
-            border.width: 1
+            spacing: theme.s3
 
             ColumnLayout {
-                id: statusLayout
-                anchors { fill: parent; margins: 12 }
-                spacing: 6
+                spacing: 2
+                Text {
+                    text: "Whistleblower"
+                    color: theme.fg
+                    font.pixelSize: theme.fpHero
+                    font.bold: true
+                }
+                Text {
+                    text: "Censorship-resistant document publishing"
+                    color: theme.fg3
+                    font.pixelSize: theme.fpSm
+                }
+            }
+            Item { Layout.fillWidth: true }
+            Comp.Pill {
+                theme: theme
+                text: root.connectionPillText()
+                tone: root.connectionPillTone()
+                pulse: !root.connected || !root.deliveryReady
+                Layout.alignment: Qt.AlignVCenter
+            }
+        }
+
+        // ── Document form ────────────────────────────────────────────────────
+        Comp.Card {
+            theme: theme
+            Layout.fillWidth: true
+            Layout.preferredHeight: formCol.implicitHeight + theme.s4 * 2
+
+            ColumnLayout {
+                id: formCol
+                anchors.fill: parent
+                anchors.margins: theme.s4
+                spacing: theme.s3
+
+                Text {
+                    text: "Document"
+                    color: theme.fg
+                    font.pixelSize: theme.fpLg
+                    font.bold: true
+                }
 
                 RowLayout {
-                    spacing: 8
-                    Text { text: "Status:"; color: "#8b949e"; font.pixelSize: 13 }
+                    spacing: theme.s2
+                    Layout.fillWidth: true
+                    Comp.Field {
+                        id: pathField
+                        Layout.fillWidth: true
+                        theme: theme
+                        label: "File path"
+                        placeholderText: "/absolute/path/to/file"
+                        enabled: !root.busy
+                    }
+                    Comp.GhostButton {
+                        theme: theme
+                        text: "Browse…"
+                        Layout.alignment: Qt.AlignBottom
+                        enabled: !root.busy
+                        onClicked: filePicker.open()
+                    }
+                }
+
+                Comp.Field {
+                    id: titleField
+                    Layout.fillWidth: true
+                    theme: theme
+                    label: "Title"
+                    placeholderText: "Public title"
+                    enabled: !root.busy
+                }
+                Comp.Field {
+                    id: descField
+                    Layout.fillWidth: true
+                    theme: theme
+                    label: "Description"
+                    placeholderText: "(optional)"
+                    enabled: !root.busy
+                }
+                Comp.Field {
+                    id: tagsField
+                    Layout.fillWidth: true
+                    theme: theme
+                    label: "Tags (CSV)"
+                    placeholderText: "evidence, internal, draft"
+                    enabled: !root.busy
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: theme.s1
+                    spacing: theme.s2
+                    Item { Layout.fillWidth: true }
+                    Comp.GhostButton {
+                        theme: theme
+                        text: "Reconnect"
+                        visible: !root.deliveryReady
+                        enabled: root.connected && !root.busy
+                        onClicked: backend.startBroadcaster()
+                    }
+                    Comp.PrimaryButton {
+                        theme: theme
+                        text: root.busy ? "Publishing…" : "Publish"
+                        enabled: root.connected && !root.busy &&
+                                 pathField.text.length > 0 && titleField.text.length > 0
+                        onClicked: {
+                            // Empty content type → plugin auto-detects via QMimeDatabase
+                            logos.watch(backend.publish(
+                                pathField.text, "",
+                                titleField.text, descField.text, tagsField.text
+                            ), function() {}, function(err) {
+                                console.warn("publish call failed:", err)
+                            })
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Current-publish status ──────────────────────────────────────────
+        Comp.Card {
+            theme: theme
+            Layout.fillWidth: true
+            Layout.preferredHeight: statusCol.implicitHeight + theme.s3 * 2
+            visible: root.status.length > 0 || root.cid.length > 0
+
+            ColumnLayout {
+                id: statusCol
+                anchors.fill: parent
+                anchors.margins: theme.s3
+                spacing: theme.s2
+
+                RowLayout {
+                    spacing: theme.s2
                     Text {
-                        text: root.status === "" ? "idle" : root.status
-                        color: root.statusColor(root.status)
-                        font.pixelSize: 13
+                        text: "STATUS"
+                        color: theme.fg3
+                        font.pixelSize: theme.fpLabel
+                        font.letterSpacing: 0.8
                         font.bold: true
+                    }
+                    Comp.Pill {
+                        theme: theme
+                        text: root.status === "" ? "idle" : root.status
+                        tone: root.statusPillTone(root.status)
+                        pulse: root.busy
                     }
                     BusyIndicator {
                         running: root.busy
@@ -171,37 +229,150 @@ Item {
                         Layout.preferredHeight: 16
                         Layout.preferredWidth: 16
                     }
+                    Item { Layout.fillWidth: true }
                 }
 
                 Text {
                     visible: root.cid !== ""
-                    text: "CID: " + root.cid
-                    color: "#56d364"
-                    font.pixelSize: 12
+                    text: "CID   " + root.cid
+                    color: theme.success
+                    font.pixelSize: theme.fpSm
                     font.family: "monospace"
                     Layout.fillWidth: true
                     wrapMode: Text.WrapAnywhere
                 }
                 Text {
                     visible: root.metadataHash !== ""
-                    text: "Hash: " + root.metadataHash
-                    color: "#8b949e"
-                    font.pixelSize: 11
+                    text: "HASH  " + root.metadataHash
+                    color: theme.fg3
+                    font.pixelSize: theme.fpLabel
                     font.family: "monospace"
                     Layout.fillWidth: true
                     wrapMode: Text.WrapAnywhere
                 }
-                Text {
-                    visible: root.lastError !== ""
-                    text: "Error: " + root.lastError
-                    color: "#f85149"
-                    font.pixelSize: 12
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                }
             }
         }
 
-        Item { Layout.fillHeight: true }
+        // ── Error toast (auto-collapses when no error) ──────────────────────
+        Comp.ToastBanner {
+            theme: theme
+            Layout.fillWidth: true
+            message: root.lastError
+            tone: "danger"
+        }
+
+        // ── History header ──────────────────────────────────────────────────
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: theme.s2
+            Text {
+                text: "History"
+                color: theme.fg
+                font.pixelSize: theme.fpLg
+                font.bold: true
+            }
+            Text {
+                text: "(" + root.publishedRecords.length + ")"
+                color: theme.fg3
+                font.pixelSize: theme.fpSm
+            }
+            Item { Layout.fillWidth: true }
+            Comp.GhostButton {
+                theme: theme
+                text: "Refresh"
+                enabled: root.connected
+                onClicked: backend.refreshPublishedList()
+            }
+            Comp.GhostButton {
+                theme: theme
+                text: "Clear"
+                enabled: root.connected && !root.busy && root.publishedRecords.length > 0
+                onClicked: clearConfirm.open()
+            }
+        }
+
+        // ── History list ────────────────────────────────────────────────────
+        Comp.Card {
+            theme: theme
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumHeight: 140
+
+            ListView {
+                anchors.fill: parent
+                anchors.margins: theme.s2
+                clip: true
+                model: root.publishedRecords
+                spacing: theme.s1
+
+                delegate: Rectangle {
+                    id: row
+                    width: ListView.view.width
+                    height: rowCol.implicitHeight + theme.s3
+                    color: index % 2 === 0 ? theme.surfaceSubtle : "transparent"
+                    radius: theme.rSm
+
+                    readonly property color statusColor:
+                        modelData.status === "broadcast_sent" ? theme.success
+                      : modelData.status === "error"          ? theme.danger
+                      :                                         theme.warning
+
+                    ColumnLayout {
+                        id: rowCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: theme.s3
+                        anchors.rightMargin: theme.s3
+                        spacing: 2
+
+                        RowLayout {
+                            spacing: theme.s2
+                            Layout.fillWidth: true
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.title || "(untitled)"
+                                color: theme.fg
+                                font.pixelSize: theme.fpBody
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: (modelData.status || "").toUpperCase()
+                                color: row.statusColor
+                                font.pixelSize: theme.fpLabel
+                                font.bold: true
+                                font.letterSpacing: 0.4
+                            }
+                        }
+                        Text {
+                            visible: !!modelData.cid
+                            text: "CID  " + (modelData.cid || "")
+                            color: theme.fg3
+                            font.pixelSize: theme.fpLabel
+                            font.family: "monospace"
+                            Layout.fillWidth: true
+                            elide: Text.ElideMiddle
+                        }
+                        Text {
+                            visible: !!modelData.error && modelData.status === "error"
+                            text: (modelData.code ? modelData.code + ": " : "") + (modelData.error || "")
+                            color: theme.danger
+                            font.pixelSize: theme.fpLabel
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    visible: root.publishedRecords.length === 0
+                    text: "No publishes yet"
+                    color: theme.fg4
+                    font.pixelSize: theme.fpSm
+                }
+            }
+        }
     }
 }
