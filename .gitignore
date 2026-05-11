@@ -1,0 +1,10 @@
+target/
+methods/guest/target/
+*.bin
+.chronicle_registry-state
+.chronicle_registry-state.tmp
+.scaffold
+
+# batch-anchor — sibling tool living under chronicle-registry/
+batch-anchor/target/
+batch-anchor/store/store.sqlite3*

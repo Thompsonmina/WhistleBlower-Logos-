@@ -1,0 +1,129 @@
+#![no_main]
+
+use spel_framework::prelude::*;
+use nssa_core::account::Data;
+
+use chronicle_registry_core::{
+    CidRecord, Registry, MAX_BATCH,
+    E_ARITY_MISMATCH, E_BAD_TIMESTAMP, E_BATCH_EMPTY, E_BATCH_TOO_BIG,
+    E_INVALID_HASH, E_REGISTRY_FULL,
+};
+
+risc0_zkvm::guest::entry!(main);
+
+#[lez_program]
+mod chronicle_registry {
+    #[allow(unused_imports)]
+    use super::*;
+
+    /// Open the registry. Permissionless — anyone can call this once.
+    /// Subsequent calls fail with `AccountAlreadyInitialized` (code 1002),
+    /// which the caller treats as a no-op success.
+    #[instruction]
+    pub fn init_registry(
+        #[account(init, pda = [literal("registry")])]
+        mut registry: AccountWithMetadata,
+        #[account(signer)]
+        anchorer: AccountWithMetadata,
+    ) -> SpelResult {
+        let empty = Registry::default();
+        let bytes = borsh::to_vec(&empty)
+            .map_err(|e| SpelError::SerializationError { message: e.to_string() })?;
+        registry.account.data = Data::try_from(bytes)
+            .map_err(|_| SpelError::custom(E_REGISTRY_FULL, "registry bytes overflow".to_string()))?;
+        Ok(SpelOutput::execute(vec![registry, anchorer], vec![]))
+    }
+
+    /// Anchor a batch of CIDs into the registry. Caller must:
+    ///   1. Have already called `init_registry`.
+    ///   2. Pass three parallel vectors of equal length: `cids[i]`,
+    ///      `metadata_hashes[i]`, `anchor_timestamps[i]` describe the
+    ///      i-th record.
+    ///   3. Keep batch size in `[1, MAX_BATCH]`.
+    ///
+    /// Timestamps are u32 unix-seconds (good until year 2106) so the spel
+    /// CLI can serialize them natively. Stored on-chain as i64.
+    ///
+    /// Duplicates (CIDs already present in the registry) are silently skipped —
+    /// idempotency is enforced in-program. Tx succeeds even if every entry
+    /// in the batch was a duplicate.
+    #[instruction]
+    pub fn index_batch(
+        #[account(mut, pda = [literal("registry")])]
+        mut registry: AccountWithMetadata,
+        #[account(signer)]
+        anchorer: AccountWithMetadata,
+        cids: Vec<String>,
+        metadata_hashes: Vec<[u8; 32]>,
+        anchor_timestamps: Vec<u32>,
+    ) -> SpelResult {
+        // 1. Validate batch shape.
+        let n = cids.len();
+        if n == 0 {
+            return Err(SpelError::custom(E_BATCH_EMPTY, "batch is empty".to_string()));
+        }
+        if n > MAX_BATCH {
+            return Err(SpelError::custom(
+                E_BATCH_TOO_BIG,
+                format!("batch size {} > MAX_BATCH {}", n, MAX_BATCH),
+            ));
+        }
+        if metadata_hashes.len() != n || anchor_timestamps.len() != n {
+            return Err(SpelError::custom(
+                E_ARITY_MISMATCH,
+                format!(
+                    "cids={}, metadata_hashes={}, anchor_timestamps={} (must all match)",
+                    n, metadata_hashes.len(), anchor_timestamps.len()
+                ),
+            ));
+        }
+
+        // 2. Validate each record.
+        let anchorer_id = *anchorer.account_id.value();
+        for i in 0..n {
+            if cids[i].is_empty() || metadata_hashes[i] == [0u8; 32] {
+                return Err(SpelError::custom(E_INVALID_HASH, "cid empty or metadata_hash all-zero".to_string()));
+            }
+            if anchor_timestamps[i] == 0 {
+                return Err(SpelError::custom(
+                    E_BAD_TIMESTAMP,
+                    "anchor_timestamp == 0".to_string(),
+                ));
+            }
+        }
+
+        // 3. Load existing registry state. Init-claim done by `init_registry`.
+        let mut state = if registry.account.data.is_empty() {
+            Registry::default()
+        } else {
+            borsh::from_slice::<Registry>(&registry.account.data)
+                .map_err(|e| SpelError::SerializationError { message: e.to_string() })?
+        };
+
+        // 4. Insert each entry. We consume `cids` so the String moves into the
+        //    map instead of being cloned. `contains_key` skips duplicates,
+        //    which also covers intra-batch dupes for free.
+        for (i, cid) in cids.into_iter().enumerate() {
+            if state.entries.contains_key(&cid) {
+                continue; // silent skip — idempotent
+            }
+            state.entries.insert(
+                cid,
+                CidRecord {
+                    metadata_hash: metadata_hashes[i],
+                    anchor_timestamp: anchor_timestamps[i] as i64,
+                    anchored_by: anchorer_id,
+                    version: 1,
+                },
+            );
+        }
+
+        // 5. Re-serialize and write back. 100 KiB cap enforced by Data::try_from.
+        let bytes = borsh::to_vec(&state)
+            .map_err(|e| SpelError::SerializationError { message: e.to_string() })?;
+        registry.account.data = Data::try_from(bytes)
+            .map_err(|_| SpelError::custom(E_REGISTRY_FULL, "registry would exceed 100 KiB".to_string()))?;
+
+        Ok(SpelOutput::execute(vec![registry, anchorer], vec![]))
+    }
+}

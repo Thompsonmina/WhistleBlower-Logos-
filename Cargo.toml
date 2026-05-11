@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "chronicle_registry_core",
+    "methods",
+    "examples",
+]
+exclude = [
+    "methods/guest",
+    "batch-anchor",
+]
+resolver = "2"
