@@ -77,11 +77,15 @@ ModuleCallOutcome parseModuleCallOutcome(const QVariant& value) {
     const QString resultError = result.error.toString();
     if (result.success || !resultError.isEmpty()) {
         outcome.success = result.success;
-        outcome.value = result.getString();
-        if (outcome.value.isEmpty()) {
-            outcome.value = result.value.toString();
-        }
         outcome.error = resultError;
+        // getString() throws LogosResultException when success is false.
+        // Only read the value on success.
+        if (result.success) {
+            outcome.value = result.getString();
+            if (outcome.value.isEmpty()) {
+                outcome.value = result.value.toString();
+            }
+        }
         return outcome;
     }
 
@@ -485,6 +489,62 @@ void ChroniclePlugin::ensureStorageModule() {
         this);
 }
 
+bool ChroniclePlugin::ensureStorageReady(QString* error) {
+    ensureStorageModule();
+    if (m_storageClient == nullptr) {
+        if (error != nullptr) {
+            *error = QStringLiteral("storage_module client unavailable");
+        }
+        return false;
+    }
+
+    auto isAlreadyInitErr = [](const QString& msg) {
+        const QString lower = msg.toLower();
+        return lower.contains(QStringLiteral("already"));
+    };
+
+    if (!m_storageInitialized) {
+        const QString dataDir =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+            QStringLiteral("/chronicle/storage");
+        QDir().mkpath(dataDir);
+
+        QJsonObject config;
+        config.insert(QStringLiteral("data-dir"), dataDir);
+        const QString configJson = compactJson(config);
+
+        const QVariant response = m_storageClient->invokeRemoteMethod(
+            QStringLiteral("storage_module"),
+            QStringLiteral("init"),
+            configJson);
+        const ModuleCallOutcome outcome = parseModuleCallOutcome(response);
+        if (!outcome.success && !isAlreadyInitErr(outcome.error)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("storage init failed: %1")
+                             .arg(outcome.error);
+            }
+            return false;
+        }
+        m_storageInitialized = true;
+    }
+
+    if (!m_storageStarted) {
+        const QVariant response = m_storageClient->invokeRemoteMethod(
+            QStringLiteral("storage_module"),
+            QStringLiteral("start"));
+        const ModuleCallOutcome outcome = parseModuleCallOutcome(response);
+        if (!outcome.success && !isAlreadyInitErr(outcome.error)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("storage start failed: %1")
+                             .arg(outcome.error);
+            }
+            return false;
+        }
+        m_storageStarted = true;
+    }
+    return true;
+}
+
 void ChroniclePlugin::ensureStorageEventSubscription() {
     ensureStorageModule();
     if (m_storageEventsSubscribed || m_storageClient == nullptr) {
@@ -651,6 +711,11 @@ QString ChroniclePlugin::startBroadcasterJson() {
     if (m_logosAPI == nullptr) {
         return errorToJson(QStringLiteral("INTERNAL"),
                            QStringLiteral("module not initialised - initLogos was not called"));
+    }
+
+    QString storageError;
+    if (!ensureStorageReady(&storageError)) {
+        return errorToJson(QStringLiteral("STORAGE_UNAVAILABLE"), storageError);
     }
 
     QString deliveryError;
@@ -1379,6 +1444,45 @@ QString ChroniclePlugin::listPublishedJson() {
     QJsonObject out;
     out.insert(QStringLiteral("ok"), true);
     out.insert(QStringLiteral("records"), arr);
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::clearPublishedJson() {
+    // Refuse if any publish is still in flight. A clear mid-stream would
+    // orphan a queued upload or pending broadcast — and when the upload
+    // completes its callback would write a fresh record back into the
+    // freshly-empty ledger, partly defeating the clear.
+    QStringList inFlight;
+    for (auto it = m_publishes.constBegin();
+         it != m_publishes.constEnd(); ++it) {
+        const QString& s = it->status;
+        if (s != QStringLiteral("broadcast_sent") &&
+            s != QStringLiteral("error")) {
+            inFlight.append(it->publishId);
+        }
+    }
+    if (!inFlight.isEmpty()) {
+        return errorToJson(
+            QStringLiteral("PUBLISH_IN_FLIGHT"),
+            QStringLiteral("cannot clear: %1 publish(es) still in progress")
+                .arg(inFlight.size()));
+    }
+
+    const int cleared = m_publishes.size();
+    m_publishes.clear();
+    m_publishDedupe.clear();
+
+    const QString path = publishLedgerPath();
+    if (QFile::exists(path) && !QFile::remove(path)) {
+        qWarning() << "ChroniclePlugin: failed to delete publish ledger:"
+                   << path;
+    }
+
+    qDebug() << "ChroniclePlugin: cleared" << cleared << "publish records";
+
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("cleared"), cleared);
     return compactJson(out);
 }
 

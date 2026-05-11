@@ -13,7 +13,7 @@ an `"ok"` boolean at the top level.
 
 | Group | Methods |
 |---|---|
-| **Publish** (high-level) | `publishFileJson`, `publishStatusJson`, `listPublishedJson` |
+| **Publish** (high-level) | `publishFileJson`, `publishStatusJson`, `listPublishedJson`, `clearPublishedJson` |
 | **Upload** (low-level) | `uploadFileJson`, `uploadStatusJson` |
 | **Envelope** utilities | `normalizeContentTypeJson`, `hashMetadataJson`, `buildMetadataEnvelopeJson` |
 | **Broadcast** (low-level) | `startBroadcasterJson`, `broadcastEnvelopeJson`, `broadcastStatusJson` |
@@ -202,6 +202,35 @@ completed, and failed records. Excludes low-level upload retry details.
 
 Records survive module restarts via the local publish ledger (see
 [Persistence](#persistence)).
+
+---
+
+### `clearPublishedJson()`
+
+Wipes the in-memory publish records, the dedup index, and the on-disk publish
+ledger. Refuses to clear if any publish is still in flight — pending uploads
+and broadcasts continue running and their completion callbacks would re-write
+records into the freshly-cleared ledger. Wait for in-flight publishes to reach
+a terminal state (`broadcast_sent` or `error`) before clearing.
+
+Storage-module blobs and delivery-module broadcasts are **not** rolled back —
+only Chronicle's local index of past publishes is removed.
+
+Success:
+
+```json
+{ "ok": true, "cleared": 7 }
+```
+
+Refusal:
+
+```json
+{
+  "ok":    false,
+  "code":  "PUBLISH_IN_FLIGHT",
+  "error": "cannot clear: 2 publish(es) still in progress"
+}
+```
 
 ---
 

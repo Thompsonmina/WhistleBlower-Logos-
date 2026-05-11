@@ -50,6 +50,8 @@ public:
         const QString& publishId) = 0;
 
     Q_INVOKABLE virtual QString listPublishedJson() = 0;
+
+    Q_INVOKABLE virtual QString clearPublishedJson() = 0;
 };
 
 #define ChronicleInterface_iid "org.logos.ChronicleInterface"

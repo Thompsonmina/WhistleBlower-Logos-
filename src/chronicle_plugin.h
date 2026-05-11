@@ -54,6 +54,7 @@ public:
     Q_INVOKABLE QString publishStatusJson(
         const QString& publishId) override;
     Q_INVOKABLE QString listPublishedJson() override;
+    Q_INVOKABLE QString clearPublishedJson() override;
 
 signals:
     void eventResponse(const QString& eventName, const QVariantList& args);
@@ -126,6 +127,7 @@ private:
                                     PendingUpload* pending) const;
     void ensureStorageModule();
     void ensureStorageEventSubscription();
+    bool ensureStorageReady(QString* error);
     void ensureDeliveryModule();
     bool ensureDeliveryObject(QString* error);
     bool ensureDeliveryReady(QString* error);
@@ -160,6 +162,8 @@ private:
     LogosObject* m_storageEvents = nullptr;
     LogosObject* m_deliveryObject = nullptr;
     bool m_storageEventsSubscribed = false;
+    bool m_storageInitialized = false;
+    bool m_storageStarted = false;
     bool m_deliveryObjectReady = false;
     bool m_deliveryNodeCreated = false;
     bool m_deliveryStarted = false;
