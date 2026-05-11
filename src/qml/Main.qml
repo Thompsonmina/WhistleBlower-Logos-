@@ -28,6 +28,33 @@ Rectangle {
         try { return JSON.parse(publishedRecordsJson) } catch (e) { return [] }
     }
 
+    // ── Anchor state ────────────────────────────────────────────────────────
+    readonly property string anchorCapabilitiesJson: backend ? backend.anchorCapabilitiesJson : ""
+    readonly property string anchorConfigJson:       backend ? backend.anchorConfigJson : ""
+    readonly property string anchorsJson:            backend ? backend.anchorsJson : ""
+    readonly property var anchorCaps: {
+        if (!anchorCapabilitiesJson) return { configured: false, missing_fields: [] }
+        try { return JSON.parse(anchorCapabilitiesJson) } catch (e) { return { configured: false, missing_fields: [] } }
+    }
+    readonly property bool anchorConfigured: !!anchorCaps.configured
+    // anchorsJson is keyed by CID (matches on-chain identity, lets two
+    // publishes of the same document share anchor state).
+    readonly property var anchorsByCid: {
+        if (!anchorsJson) return {}
+        try { return JSON.parse(anchorsJson) || {} } catch (e) { return {} }
+    }
+    function anchorStateFor(cid) {
+        if (!cid) return null
+        return anchorsByCid[cid] || null
+    }
+    function anchorButtonLabel(cid) {
+        var s = anchorStateFor(cid)
+        if (!s) return "Anchor"
+        if (s.state === "confirmed") return "Anchored ✓"
+        if (s.state === "failed") return "Retry"
+        return "Anchor"
+    }
+
     Theme { id: theme }
 
     function connectionPillTone() {
@@ -64,6 +91,30 @@ Rectangle {
               "broadcasts already sent will not be rolled back."
         buttons: MessageDialog.Yes | MessageDialog.Cancel
         onAccepted: backend.clearHistory()
+    }
+
+    Comp.AnchorConfigDialog {
+        id: anchorConfig
+        theme: theme
+        anchors.centerIn: parent
+        capabilitiesJson: root.anchorCapabilitiesJson
+        // configJson from chronicle is wrapped: {"ok": true, "config": {...}}
+        configJson: {
+            try {
+                var w = JSON.parse(root.anchorConfigJson || "{}")
+                return JSON.stringify(w.config || {})
+            } catch (e) { return "{}" }
+        }
+        onSave: function(cfgJson) { backend.setAnchorConfig(cfgJson) }
+    }
+
+    function handleAnchorClick(publishId) {
+        if (!root.anchorConfigured) {
+            anchorConfig.pendingPublishId = publishId
+            anchorConfig.open()
+            return
+        }
+        backend.anchorPublished(publishId)
     }
 
     ColumnLayout {
@@ -343,6 +394,16 @@ Rectangle {
                                 font.pixelSize: theme.fpLabel
                                 font.bold: true
                                 font.letterSpacing: 0.4
+                            }
+                            Comp.GhostButton {
+                                visible: modelData.status === "broadcast_sent"
+                                theme: theme
+                                text: root.anchorButtonLabel(modelData.cid)
+                                enabled: {
+                                    var s = root.anchorStateFor(modelData.cid)
+                                    return !(s && s.state === "submitting")
+                                }
+                                onClicked: root.handleAnchorClick(modelData.publish_id)
                             }
                         }
                         Text {

@@ -14,4 +14,13 @@ class Whistleblower
     SLOT(void startBroadcaster())
     SLOT(void refreshPublishedList())
     SLOT(void clearHistory())
+
+    PROP(QString anchorCapabilitiesJson READWRITE)
+    PROP(QString anchorConfigJson READWRITE)
+    PROP(QString anchorsJson READWRITE)
+
+    SLOT(void anchorPublished(QString publishId))
+    SLOT(void refreshAnchorCapabilities())
+    SLOT(void setAnchorConfig(QString cfgJson))
+    SLOT(void refreshAnchors())
 }

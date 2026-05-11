@@ -64,6 +64,12 @@ void WhistleblowerPlugin::initLogos(LogosAPI* api) {
     // not depend on storage or delivery being initialised.
     QTimer::singleShot(0, this, [this]() { refreshPublishedList(); });
 
+    setAnchorsJson(QStringLiteral("{}"));
+    // Anchor capabilities + saved config + persisted anchor map — file-only
+    // reads, no on-chain calls.
+    QTimer::singleShot(0, this, [this]() { refreshAnchorCapabilities(); });
+    QTimer::singleShot(0, this, [this]() { refreshAnchors(); });
+
     // Pre-warm Chronicle's delivery+storage services. First attempt usually
     // races with delivery_module's slow Waku-node bring-up; startBroadcaster
     // self-retries with backoff if it fails.
@@ -163,6 +169,98 @@ void WhistleblowerPlugin::refreshPublishedList() {
         QJsonDocument(records).toJson(QJsonDocument::Compact)));
 }
 
+void WhistleblowerPlugin::refreshAnchorCapabilities() {
+    setAnchorCapabilitiesJson(callChronicle(QStringLiteral("anchorCapabilitiesJson")));
+    setAnchorConfigJson(callChronicle(QStringLiteral("getAnchorConfigJson")));
+}
+
+void WhistleblowerPlugin::setAnchorConfig(QString cfgJson) {
+    const QString resp = callChronicle(
+        QStringLiteral("setAnchorConfigJson"),
+        QVariantList{cfgJson});
+    const QJsonObject obj = parseObject(resp);
+    if (!obj.value(QStringLiteral("ok")).toBool()) {
+        const QString code  = obj.value(QStringLiteral("code")).toString();
+        const QString error = obj.value(QStringLiteral("error")).toString();
+        setLastError(code.isEmpty() ? error
+                                    : QStringLiteral("%1: %2").arg(code, error));
+        return;
+    }
+    setLastError(QString());
+    refreshAnchorCapabilities();
+}
+
+void WhistleblowerPlugin::refreshAnchors() {
+    // Chronicle is authoritative — read its persisted map and mirror to the
+    // QML-facing property. Keyed by CID (matches the on-chain identifier).
+    const QString resp = callChronicle(QStringLiteral("listAnchorsJson"));
+    const QJsonObject obj = parseObject(resp);
+    if (!obj.value(QStringLiteral("ok")).toBool()) return;
+    const QJsonObject anchors = obj.value(QStringLiteral("anchors")).toObject();
+    setAnchorsJson(QString::fromUtf8(
+        QJsonDocument(anchors).toJson(QJsonDocument::Compact)));
+}
+
+void WhistleblowerPlugin::anchorPublished(QString publishId) {
+    // Look up the publish record from the cached list so we can build the
+    // (cid, metadata_hash, timestamp) tuple. Parsing the JSON each click is
+    // fine for phase 1 — list size is small.
+    const QJsonDocument recordsDoc =
+        QJsonDocument::fromJson(publishedRecordsJson().toUtf8());
+    QJsonObject record;
+    if (recordsDoc.isArray()) {
+        for (const QJsonValue& v : recordsDoc.array()) {
+            const QJsonObject candidate = v.toObject();
+            if (candidate.value(QStringLiteral("publish_id")).toString() == publishId) {
+                record = candidate;
+                break;
+            }
+        }
+    }
+    if (record.isEmpty()) {
+        setLastError(QStringLiteral("publish record not found: %1").arg(publishId));
+        return;
+    }
+
+    const QString cid   = record.value(QStringLiteral("cid")).toString();
+    const QString mhash = record.value(QStringLiteral("metadata_hash")).toString();
+    // Convert ms → s for the on-chain u32 timestamp field.
+    const qint64 tsMs   = record.value(QStringLiteral("created_at_ms")).toVariant().toLongLong();
+    const qint64 tsSec  = tsMs > 0 ? tsMs / 1000 : 0;
+
+    QJsonObject entry;
+    entry.insert(QStringLiteral("publish_id"), publishId);
+    entry.insert(QStringLiteral("cid"), cid);
+    entry.insert(QStringLiteral("metadata_hash"), mhash);
+    entry.insert(QStringLiteral("timestamp"), tsSec);
+
+    QJsonArray entries;
+    entries.append(entry);
+    QJsonObject req;
+    req.insert(QStringLiteral("entries"), entries);
+    const QString requestJson = QString::fromUtf8(
+        QJsonDocument(req).toJson(QJsonDocument::Compact));
+
+    const QString resp = callChronicle(
+        QStringLiteral("anchorBatchJson"),
+        QVariantList{requestJson});
+    const QJsonObject obj = parseObject(resp);
+
+    if (!obj.value(QStringLiteral("ok")).toBool()) {
+        const QString code  = obj.value(QStringLiteral("code")).toString();
+        const QString error = obj.value(QStringLiteral("error")).toString();
+        setLastError(code.isEmpty() ? error
+                                    : QStringLiteral("%1: %2").arg(code, error));
+    } else {
+        setLastError(QString());
+    }
+
+    // Chronicle has persisted the resulting record (or skipped persistence
+    // because the attempt never reached the chain). Re-read its authoritative
+    // map rather than mirroring locally.
+    refreshAnchors();
+}
+
 void WhistleblowerPlugin::clearHistory() {
     if (busy()) {
         setLastError(QStringLiteral("cannot clear while a publish is in progress"));
@@ -184,6 +282,10 @@ void WhistleblowerPlugin::clearHistory() {
     setMetadataHash(QString());
     setCurrentPublishId(QString());
     setLastError(QString());
+    // Anchor records are keyed by CID — cleared publishes mean orphaned
+    // anchor entries with no UI row to render on. Wipe them too.
+    callChronicle(QStringLiteral("clearAnchorsJson"));
+    refreshAnchors();
     refreshPublishedList();
 }
 

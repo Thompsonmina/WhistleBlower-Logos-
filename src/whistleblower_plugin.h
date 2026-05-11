@@ -40,6 +40,11 @@ public:
     void refreshPublishedList() override;
     void clearHistory() override;
 
+    void anchorPublished(QString publishId) override;
+    void refreshAnchorCapabilities() override;
+    void setAnchorConfig(QString cfgJson) override;
+    void refreshAnchors() override;
+
 signals:
     void eventResponse(const QString& eventName, const QVariantList& args);
 
