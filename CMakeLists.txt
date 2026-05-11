@@ -17,4 +17,6 @@ logos_module(
         src/chronicle_plugin.cpp
         src/chronicle_helpers.h
         src/chronicle_helpers.cpp
+        src/chronicle_anchor_config.h
+        src/chronicle_anchor_config.cpp
 )

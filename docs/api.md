@@ -14,6 +14,7 @@ an `"ok"` boolean at the top level.
 | Group | Methods |
 |---|---|
 | **Publish** (high-level) | `publishFileJson`, `publishStatusJson`, `listPublishedJson`, `clearPublishedJson` |
+| **Anchor** (on-chain, phase 1) | `anchorCapabilitiesJson`, `getAnchorConfigJson`, `setAnchorConfigJson`, `anchorBatchJson`, `anchorStatusJson`, `lookupAnchorJson`, `listAnchorsJson`, `clearAnchorsJson` |
 | **Upload** (low-level) | `uploadFileJson`, `uploadStatusJson` |
 | **Envelope** utilities | `normalizeContentTypeJson`, `hashMetadataJson`, `buildMetadataEnvelopeJson` |
 | **Broadcast** (low-level) | `startBroadcasterJson`, `broadcastEnvelopeJson`, `broadcastStatusJson` |
@@ -230,6 +231,174 @@ Refusal:
   "code":  "PUBLISH_IN_FLIGHT",
   "error": "cannot clear: 2 publish(es) still in progress"
 }
+```
+
+---
+
+## Anchor API (phase 1)
+
+Optional on-chain anchoring of `(cid, metadata_hash, anchor_timestamp)` tuples
+into a registry-shaped SPEL program (see `chronicle-registry/`). Phase 1 ships
+the config plumbing and the method shapes; the action methods (`anchorBatchJson`,
+`anchorStatusJson`, `lookupAnchorJson`) are stubbed and return
+`ANCHOR_NOT_CONFIGURED` until the user populates settings, then
+`ANCHOR_NOT_IMPLEMENTED` until phase 2 wires the on-chain call.
+
+Config is persisted as JSON under `QStandardPaths::AppDataLocation`:
+`~/.local/share/logos_host_qt/chronicle/anchor-config.json` on Linux.
+
+### `anchorCapabilitiesJson()`
+
+What the UI calls on startup to decide whether to surface anchor buttons.
+
+```json
+{
+  "ok":             true,
+  "enabled":        false,
+  "configured":     false,
+  "missing_fields": ["program_id"],
+  "program_id":     "",
+  "backend":        "stub"
+}
+```
+
+`enabled == configured` in phase 1. `backend` becomes `"subprocess"` or
+`"ffi"` once a real on-chain mechanism is wired.
+
+### `getAnchorConfigJson()`
+
+Read the current saved config. Used to pre-fill the settings modal.
+
+```json
+{
+  "ok":     true,
+  "config": {
+    "program_id":        "",
+    "sequencer_url":     "http://127.0.0.1:3040",
+    "wallet_home":       "../.scaffold/wallet",
+    "signer_account_id": "DkyMG8uaEJqv1A8at8b8cdktNeaaMhaWY57VETgEVaMX"
+  }
+}
+```
+
+### `setAnchorConfigJson(cfgJson)`
+
+Persist a new config. Body must be a JSON object with the same shape as
+`getAnchorConfigJson`'s `config`. Returns the post-save configured state so
+the UI can re-render without a second round trip.
+
+```json
+{
+  "ok":             true,
+  "configured":     true,
+  "missing_fields": []
+}
+```
+
+Failures:
+
+```json
+{ "ok": false, "code": "BAD_CONFIG",          "error": "request body must be a JSON object" }
+{ "ok": false, "code": "CONFIG_WRITE_FAILED", "error": "<filesystem error string>" }
+```
+
+### `anchorBatchJson(requestJson)` — *phase 1 stub, persists results*
+
+Request shape (each entry's `publish_id` is optional, used for audit only —
+chronicle keys the persisted record by `cid`):
+
+```json
+{
+  "entries": [
+    {
+      "cid":           "zDvZ...",
+      "metadata_hash": "v1:...",
+      "timestamp":     1736294400,
+      "publish_id":    "57b59365-..."
+    }
+  ]
+}
+```
+
+When config is missing, fails fast without persisting:
+
+```json
+{ "ok": false, "code": "ANCHOR_NOT_CONFIGURED", "missing_fields": ["program_id"] }
+```
+
+When config is complete, **phase 1 still fails** (no on-chain wiring yet) but
+**writes a terminal "failed" record per CID** into the anchor ledger before
+returning. The UI's `Retry` badges therefore survive a restart. Phase 2 will
+replace this code path with a real on-chain submit and write `confirmed`
+records on success.
+
+```json
+{ "ok": false, "code": "ANCHOR_NOT_IMPLEMENTED", "error": "..." }
+```
+
+### `anchorStatusJson(anchorId)` — *phase 1 stub*
+
+Phase 1 returns `UNKNOWN_ANCHOR_ID` for any input (no async path exists yet).
+Phase 2 will track in-flight anchors and respond from that map; eventual
+shape:
+
+```json
+{
+  "ok":        true,
+  "anchor_id": "...",
+  "state":     "queued | submitting | confirmed | failed",
+  "tx_hash":   "...",
+  "error":     "..."
+}
+```
+
+### `lookupAnchorJson(cid)` — local-cache lookup
+
+Reads from the persisted ledger; **does not hit the chain**. The
+chronicle-registry program is idempotent so the local cache is treated as
+authoritative within a session. Reconciliation with chain is an explicit
+operation (not yet implemented).
+
+```json
+{ "ok": true, "found": false, "cid": "zDvZ..." }
+
+{ "ok": true, "found": true, "record": {
+  "publish_id":      "57b59365-...",
+  "cid":             "zDvZ...",
+  "metadata_hash":   "v1:...",
+  "state":           "failed",
+  "tx_hash":         "",
+  "code":            "ANCHOR_NOT_IMPLEMENTED",
+  "error":           "...",
+  "attempted_at_ms": 1736294400000,
+  "confirmed_at_ms": 0
+} }
+```
+
+### `listAnchorsJson()`
+
+The whole anchor ledger as a map keyed by CID. The UI calls this on startup
+and after every `anchorBatchJson` to keep its per-row "Anchored ✓" / "Retry"
+badges in sync.
+
+```json
+{
+  "ok": true,
+  "anchors": {
+    "zDvZ...": { "publish_id": "...", "state": "failed", ... },
+    "zDvA...": { "publish_id": "...", "state": "confirmed", "tx_hash": "...", ... }
+  }
+}
+```
+
+### `clearAnchorsJson()`
+
+Wipes the in-memory map and removes the anchor ledger file. Mirrors
+`clearPublishedJson` semantics — local-only, on-chain records are not
+rolled back.
+
+```json
+{ "ok": true, "cleared": 7 }
 ```
 
 ---

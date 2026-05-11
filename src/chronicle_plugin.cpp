@@ -383,6 +383,9 @@ void ChroniclePlugin::initLogos(LogosAPI* api) {
     ensureStorageModule();
     ensureDeliveryModule();
     loadPublishLedger();
+    m_anchorConfig = AnchorConfigStore::load();
+    m_anchorConfigLoaded = true;
+    loadAnchorLedger();
     QTimer::singleShot(0, this, [this]() {
         ensureStorageEventSubscription();
     });
@@ -1484,6 +1487,259 @@ QString ChroniclePlugin::clearPublishedJson() {
     out.insert(QStringLiteral("ok"), true);
     out.insert(QStringLiteral("cleared"), cleared);
     return compactJson(out);
+}
+
+// ---------------------------------------------------------------------------
+// Anchor API (phase 1 — config is functional, action methods are stubs)
+// ---------------------------------------------------------------------------
+
+QString ChroniclePlugin::anchorCapabilitiesJson() {
+    if (!m_anchorConfigLoaded) {
+        m_anchorConfig = AnchorConfigStore::load();
+        m_anchorConfigLoaded = true;
+    }
+    const QStringList missing = m_anchorConfig.missingFields();
+    const bool configured = missing.isEmpty();
+
+    QJsonArray missingArr;
+    for (const QString& f : missing) missingArr.append(f);
+
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("enabled"), configured);
+    out.insert(QStringLiteral("configured"), configured);
+    out.insert(QStringLiteral("missing_fields"), missingArr);
+    out.insert(QStringLiteral("program_id"), m_anchorConfig.programId);
+    out.insert(QStringLiteral("backend"), QStringLiteral("stub"));
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::getAnchorConfigJson() {
+    if (!m_anchorConfigLoaded) {
+        m_anchorConfig = AnchorConfigStore::load();
+        m_anchorConfigLoaded = true;
+    }
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("config"), m_anchorConfig.toJson());
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::setAnchorConfigJson(const QString& cfgJson) {
+    const QJsonDocument doc = QJsonDocument::fromJson(cfgJson.toUtf8());
+    if (!doc.isObject()) {
+        return errorToJson(QStringLiteral("BAD_CONFIG"),
+                           QStringLiteral("request body must be a JSON object"));
+    }
+    AnchorConfig cfg = AnchorConfig::fromJson(doc.object());
+
+    QString saveErr;
+    if (!AnchorConfigStore::save(cfg, &saveErr)) {
+        return errorToJson(QStringLiteral("CONFIG_WRITE_FAILED"),
+                           saveErr.isEmpty() ? QStringLiteral("could not write anchor config")
+                                             : saveErr);
+    }
+    m_anchorConfig = cfg;
+    m_anchorConfigLoaded = true;
+
+    const QStringList missing = cfg.missingFields();
+    QJsonArray missingArr;
+    for (const QString& f : missing) missingArr.append(f);
+
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("configured"), missing.isEmpty());
+    out.insert(QStringLiteral("missing_fields"), missingArr);
+    return compactJson(out);
+}
+
+namespace {
+constexpr const char* kAnchorNotImplMsg =
+    "on-chain anchor backend is stubbed (phase 1)";
+}
+
+QString ChroniclePlugin::anchorBatchJson(const QString& requestJson) {
+    if (!m_anchorConfigLoaded) {
+        m_anchorConfig = AnchorConfigStore::load();
+        m_anchorConfigLoaded = true;
+    }
+    if (!m_anchorsLoaded) loadAnchorLedger();
+
+    // Config check first — don't persist failed attempts that never reached
+    // the chain because the user hadn't filled settings.
+    const QStringList missing = m_anchorConfig.missingFields();
+    if (!missing.isEmpty()) {
+        QJsonArray arr;
+        for (const QString& f : missing) arr.append(f);
+        QJsonObject out;
+        out.insert(QStringLiteral("ok"), false);
+        out.insert(QStringLiteral("code"), QStringLiteral("ANCHOR_NOT_CONFIGURED"));
+        out.insert(QStringLiteral("error"),
+                   QStringLiteral("anchor settings incomplete; populate via setAnchorConfigJson"));
+        out.insert(QStringLiteral("missing_fields"), arr);
+        return compactJson(out);
+    }
+
+    // Phase 1: this is where phase 2 will hand off to the real on-chain client.
+    // For now we record a terminal "failed" entry per CID so the UI "Retry"
+    // badges survive restarts. Phase 2's confirmed-state writes will overwrite
+    // these on the next click.
+    const QJsonDocument reqDoc = QJsonDocument::fromJson(requestJson.toUtf8());
+    const QJsonArray entries = reqDoc.object()
+                                     .value(QStringLiteral("entries")).toArray();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    for (const QJsonValue& v : entries) {
+        const QJsonObject e = v.toObject();
+        AnchorRecord ar;
+        ar.publishId     = e.value(QStringLiteral("publish_id")).toString();
+        ar.cid           = e.value(QStringLiteral("cid")).toString();
+        ar.metadataHash  = e.value(QStringLiteral("metadata_hash")).toString();
+        ar.state         = QStringLiteral("failed");
+        ar.code          = QStringLiteral("ANCHOR_NOT_IMPLEMENTED");
+        ar.error         = QString::fromLatin1(kAnchorNotImplMsg);
+        ar.attemptedAtMs = now;
+        if (!ar.cid.isEmpty()) {
+            m_anchors.insert(ar.cid, ar);
+            persistAnchorRecord(ar);
+        }
+    }
+
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), false);
+    out.insert(QStringLiteral("code"), QStringLiteral("ANCHOR_NOT_IMPLEMENTED"));
+    out.insert(QStringLiteral("error"), QString::fromLatin1(kAnchorNotImplMsg));
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::anchorStatusJson(const QString& anchorId) {
+    // Phase 1 never hands out an anchor_id — anchorBatchJson is synchronous,
+    // its result is the terminal state. Phase 2 will populate an in-flight
+    // map and respond from it here.
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), false);
+    out.insert(QStringLiteral("code"), QStringLiteral("UNKNOWN_ANCHOR_ID"));
+    out.insert(QStringLiteral("error"),
+               QStringLiteral("unknown anchor id: %1").arg(anchorId));
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::lookupAnchorJson(const QString& cid) {
+    // Reads from the persisted ledger — no chain round-trip. The chronicle
+    // registry program is idempotent so the local cache is treated as
+    // authoritative within a session; reconciliation with chain is a
+    // separate explicit operation we'll add later if needed.
+    if (!m_anchorsLoaded) loadAnchorLedger();
+    auto it = m_anchors.constFind(cid);
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    if (it == m_anchors.constEnd()) {
+        out.insert(QStringLiteral("found"), false);
+        out.insert(QStringLiteral("cid"), cid);
+        return compactJson(out);
+    }
+    out.insert(QStringLiteral("found"), true);
+    out.insert(QStringLiteral("record"), anchorRecordToJson(*it));
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::listAnchorsJson() {
+    if (!m_anchorsLoaded) loadAnchorLedger();
+    QJsonObject anchors;
+    for (auto it = m_anchors.constBegin(); it != m_anchors.constEnd(); ++it) {
+        anchors.insert(it.key(), anchorRecordToJson(it.value()));
+    }
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("anchors"), anchors);
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::clearAnchorsJson() {
+    if (!m_anchorsLoaded) loadAnchorLedger();
+    const int cleared = m_anchors.size();
+    m_anchors.clear();
+    const QString path = anchorLedgerPath();
+    if (QFile::exists(path) && !QFile::remove(path)) {
+        qWarning() << "ChroniclePlugin: failed to delete anchor ledger:" << path;
+    }
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("cleared"), cleared);
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::anchorLedgerPath() const {
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+           QStringLiteral("/chronicle/anchor-ledger.jsonl");
+}
+
+QJsonObject ChroniclePlugin::anchorRecordToJson(const AnchorRecord& record) const {
+    QJsonObject obj;
+    obj.insert(QStringLiteral("publish_id"),       record.publishId);
+    obj.insert(QStringLiteral("cid"),              record.cid);
+    obj.insert(QStringLiteral("metadata_hash"),    record.metadataHash);
+    obj.insert(QStringLiteral("state"),            record.state);
+    obj.insert(QStringLiteral("tx_hash"),          record.txHash);
+    obj.insert(QStringLiteral("code"),             record.code);
+    obj.insert(QStringLiteral("error"),            record.error);
+    obj.insert(QStringLiteral("attempted_at_ms"),  record.attemptedAtMs);
+    obj.insert(QStringLiteral("confirmed_at_ms"),  record.confirmedAtMs);
+    return obj;
+}
+
+void ChroniclePlugin::persistAnchorRecord(const AnchorRecord& record) {
+    const QString path = anchorLedgerPath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile f(path);
+    if (!f.open(QIODevice::Append | QIODevice::Text)) {
+        qWarning() << "ChroniclePlugin: could not write anchor ledger:" << path;
+        return;
+    }
+    QJsonObject entry;
+    entry.insert(QStringLiteral("type"), QStringLiteral("anchor_updated"));
+    entry.insert(QStringLiteral("record"), anchorRecordToJson(record));
+    QTextStream out(&f);
+    out << QJsonDocument(entry).toJson(QJsonDocument::Compact) << QChar('\n');
+}
+
+void ChroniclePlugin::loadAnchorLedger() {
+    m_anchorsLoaded = true;
+    const QString path = anchorLedgerPath();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return;
+    }
+    QHash<QString, QJsonObject> latest;
+    QTextStream in(&f);
+    while (!in.atEnd()) {
+        const QString line = in.readLine().trimmed();
+        if (line.isEmpty()) continue;
+        const QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8());
+        if (!doc.isObject()) continue;
+        const QJsonObject entry = doc.object();
+        if (entry.value(QStringLiteral("type")).toString() !=
+            QStringLiteral("anchor_updated")) continue;
+        const QJsonObject rec = entry.value(QStringLiteral("record")).toObject();
+        const QString cid = rec.value(QStringLiteral("cid")).toString();
+        if (!cid.isEmpty()) latest.insert(cid, rec);
+    }
+    for (auto it = latest.constBegin(); it != latest.constEnd(); ++it) {
+        const QJsonObject& rec = it.value();
+        AnchorRecord ar;
+        ar.publishId      = rec.value(QStringLiteral("publish_id")).toString();
+        ar.cid            = rec.value(QStringLiteral("cid")).toString();
+        ar.metadataHash   = rec.value(QStringLiteral("metadata_hash")).toString();
+        ar.state          = rec.value(QStringLiteral("state")).toString();
+        ar.txHash         = rec.value(QStringLiteral("tx_hash")).toString();
+        ar.code           = rec.value(QStringLiteral("code")).toString();
+        ar.error          = rec.value(QStringLiteral("error")).toString();
+        ar.attemptedAtMs  = rec.value(QStringLiteral("attempted_at_ms")).toVariant().toLongLong();
+        ar.confirmedAtMs  = rec.value(QStringLiteral("confirmed_at_ms")).toVariant().toLongLong();
+        m_anchors.insert(ar.cid, ar);
+    }
+    qDebug() << "ChroniclePlugin: loaded" << m_anchors.size()
+             << "anchor records from ledger";
 }
 
 // ---------------------------------------------------------------------------

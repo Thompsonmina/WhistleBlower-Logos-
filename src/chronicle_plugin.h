@@ -9,6 +9,7 @@
 #include <QStringList>
 #include <QVariantList>
 
+#include "chronicle_anchor_config.h"
 #include "chronicle_interface.h"
 #include "logos_api.h"
 
@@ -55,6 +56,15 @@ public:
         const QString& publishId) override;
     Q_INVOKABLE QString listPublishedJson() override;
     Q_INVOKABLE QString clearPublishedJson() override;
+
+    Q_INVOKABLE QString anchorCapabilitiesJson() override;
+    Q_INVOKABLE QString getAnchorConfigJson() override;
+    Q_INVOKABLE QString setAnchorConfigJson(const QString& cfgJson) override;
+    Q_INVOKABLE QString anchorBatchJson(const QString& requestJson) override;
+    Q_INVOKABLE QString anchorStatusJson(const QString& anchorId) override;
+    Q_INVOKABLE QString lookupAnchorJson(const QString& cid) override;
+    Q_INVOKABLE QString listAnchorsJson() override;
+    Q_INVOKABLE QString clearAnchorsJson() override;
 
 signals:
     void eventResponse(const QString& eventName, const QVariantList& args);
@@ -175,6 +185,30 @@ private:
     QHash<QString, PendingPublish> m_publishes;
     QHash<QString, QString> m_publishDedupe;        // dedupeKey -> publishId
     QHash<QString, QString> m_broadcastToPublishId; // broadcastId -> publishId
+
+    // ── Anchor config (phase 1 — see chronicle_anchor_config.h) ─────────────
+    AnchorConfig m_anchorConfig;
+    bool m_anchorConfigLoaded = false;
+
+    // ── Anchor ledger (persisted state, source of truth for the UI) ─────────
+    struct AnchorRecord {
+        QString publishId;
+        QString cid;
+        QString metadataHash;
+        QString state;        // "confirmed" | "failed" — only terminal states persist
+        QString txHash;
+        QString code;
+        QString error;
+        qint64  attemptedAtMs = 0;
+        qint64  confirmedAtMs = 0;
+    };
+    QHash<QString, AnchorRecord> m_anchors;
+    bool m_anchorsLoaded = false;
+
+    QString anchorLedgerPath() const;
+    void    loadAnchorLedger();
+    void    persistAnchorRecord(const AnchorRecord& record);
+    QJsonObject anchorRecordToJson(const AnchorRecord& record) const;
 };
 
 #endif // CHRONICLE_PLUGIN_H

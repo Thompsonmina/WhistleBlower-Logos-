@@ -52,6 +52,21 @@ public:
     Q_INVOKABLE virtual QString listPublishedJson() = 0;
 
     Q_INVOKABLE virtual QString clearPublishedJson() = 0;
+
+    // ── On-chain anchoring (phase 1: stubs; config is functional) ────────────
+    // anchorCapabilitiesJson / get / set are functional now and let the UI
+    // collect anchor settings before the on-chain backend is wired.
+    // The three action methods (batch / status / lookup) currently return
+    // ANCHOR_NOT_CONFIGURED while unconfigured, ANCHOR_NOT_IMPLEMENTED once
+    // configured. Phase 2 swaps the implementation behind the same interface.
+    Q_INVOKABLE virtual QString anchorCapabilitiesJson() = 0;
+    Q_INVOKABLE virtual QString getAnchorConfigJson() = 0;
+    Q_INVOKABLE virtual QString setAnchorConfigJson(const QString& cfgJson) = 0;
+    Q_INVOKABLE virtual QString anchorBatchJson(const QString& requestJson) = 0;
+    Q_INVOKABLE virtual QString anchorStatusJson(const QString& anchorId) = 0;
+    Q_INVOKABLE virtual QString lookupAnchorJson(const QString& cid) = 0;
+    Q_INVOKABLE virtual QString listAnchorsJson() = 0;
+    Q_INVOKABLE virtual QString clearAnchorsJson() = 0;
 };
 
 #define ChronicleInterface_iid "org.logos.ChronicleInterface"
