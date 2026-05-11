@@ -15,10 +15,25 @@ DAEMON_LOG="$RUN_DIR/daemon.log"
 
 mkdir -p "$LOG_DIR" "$PERSIST_DIR"
 
-stop_daemon() {
+# Belt-and-braces cleanup. `logoscore stop` is the graceful path but it
+# doesn't always reap the per-module host processes it spawned (esp. if a
+# host is mid-syscall during Waku/storage init). Follow it with a pkill
+# scoped to this run's RUN_DIR — every module host carries the path via
+# --instance-persistence-path, so the match is surgical and won't touch
+# unrelated logoscore/basecamp processes.
+cleanup_run() {
   "$LOGOSCORE" --config-dir "$LOG_DIR" stop >/dev/null 2>&1 || true
+  pkill -TERM -f "$RUN_DIR" 2>/dev/null || true
+  sleep 0.5
+  pkill -KILL -f "$RUN_DIR" 2>/dev/null || true
+  local survivors
+  survivors="$(pgrep -af "$RUN_DIR" | grep -v "pgrep -af" || true)"
+  if [[ -n "$survivors" ]]; then
+    echo "WARN: processes still tied to $RUN_DIR after cleanup:" >&2
+    echo "$survivors" >&2
+  fi
 }
-trap stop_daemon EXIT
+trap cleanup_run EXIT INT TERM
 
 if [[ ! -d "$CHRONICLE_MODULES" ]]; then
   echo "Chronicle modules not found at $CHRONICLE_MODULES" >&2
@@ -33,6 +48,7 @@ fi
   -m "$DELIVERY_MODULES" \
   -m "$CHRONICLE_MODULES" \
   -v >"$DAEMON_LOG" 2>&1 &
+disown
 
 sleep 1
 

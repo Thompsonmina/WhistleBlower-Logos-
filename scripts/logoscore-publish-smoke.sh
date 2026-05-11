@@ -18,10 +18,31 @@ STORAGE_CONFIG="$RUN_DIR/storage-config.json"
 mkdir -p "$LOG_DIR" "$PERSIST_DIR" "$STORAGE_DATA_DIR"
 printf '{"data-dir":"%s"}' "$STORAGE_DATA_DIR" >"$STORAGE_CONFIG"
 
-stop_daemon() {
-  "$LOGOSCORE" --config-dir "$LOG_DIR" stop >/dev/null 2>&1 || true
+# Belt-and-braces cleanup. `logoscore stop` is the graceful path but it
+# doesn't always reap the per-module host processes it spawned (esp. if a
+# host is mid-syscall during Waku/storage init). Follow it with a pkill
+# scoped to this run's RUN_DIR — every module host carries the path via
+# --instance-persistence-path, so the match is surgical and won't touch
+# unrelated logoscore/basecamp processes. Covers both the first daemon
+# (LOG_DIR) and the post-restart second daemon (LOG_DIR2) if set.
+cleanup_run() {
+  for cfg in "${LOG_DIR:-}" "${LOG_DIR2:-}"; do
+    if [[ -n "$cfg" && -d "$cfg" ]]; then
+      "$LOGOSCORE" --config-dir "$cfg" stop >/dev/null 2>&1 || true
+    fi
+  done
+  pkill -TERM -f "$RUN_DIR" 2>/dev/null || true
+  sleep 0.5
+  pkill -KILL -f "$RUN_DIR" 2>/dev/null || true
+  [[ -n "${SOURCE_FILE:-}" ]] && rm -f "$SOURCE_FILE"
+  local survivors
+  survivors="$(pgrep -af "$RUN_DIR" | grep -v "pgrep -af" || true)"
+  if [[ -n "$survivors" ]]; then
+    echo "WARN: processes still tied to $RUN_DIR after cleanup:" >&2
+    echo "$survivors" >&2
+  fi
 }
-trap stop_daemon EXIT
+trap cleanup_run EXIT INT TERM
 
 if [[ ! -d "$CHRONICLE_MODULES" ]]; then
   echo "Chronicle modules not found at $CHRONICLE_MODULES" >&2
@@ -34,7 +55,6 @@ fi
 # ---------------------------------------------------------------------------
 SOURCE_FILE="$(mktemp /tmp/secret-source-XXXXXX.txt)"
 echo "Chronicle publish smoke test content." >"$SOURCE_FILE"
-trap 'rm -f "$SOURCE_FILE"; stop_daemon' EXIT
 
 SOURCE_BASENAME="$(basename "$SOURCE_FILE")"
 
@@ -48,6 +68,7 @@ SOURCE_BASENAME="$(basename "$SOURCE_FILE")"
   -m "$DELIVERY_MODULES" \
   -m "$CHRONICLE_MODULES" \
   -v >"$DAEMON_LOG" 2>&1 &
+disown
 
 sleep 1
 
@@ -167,8 +188,9 @@ echo "delivery ok"
 # listPublishedJson reads from the in-memory map rebuilt from the ledger, so
 # only Chronicle needs to be loaded — no Storage or Delivery required.
 # ---------------------------------------------------------------------------
-stop_daemon
-trap 'rm -f "$SOURCE_FILE"' EXIT
+# Stop just the first daemon before swapping in the second on the same
+# persistence dir. cleanup_run remains the EXIT trap and will catch both.
+"$LOGOSCORE" --config-dir "$LOG_DIR" stop >/dev/null 2>&1 || true
 
 LOG_DIR2="$RUN_DIR/logoscore2"
 mkdir -p "$LOG_DIR2"
@@ -178,6 +200,7 @@ mkdir -p "$LOG_DIR2"
   --persistence-path "$PERSIST_DIR" \
   -m "$CHRONICLE_MODULES" \
   -v >>"$DAEMON_LOG" 2>&1 &
+disown
 
 sleep 1
 
