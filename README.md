@@ -111,9 +111,13 @@ the **LEZ SPEL program** for two reasons:
 
 ## Quick setup
 
-The flow below is the minimum to get a clone running end-to-end against
-a local LEZ devnet.  No automation glue exists yet — every step is a
-single command run in order.
+**Fast path:** once the prerequisites below are installed,
+`./scripts/run-app.sh` walks the whole flow — builds the registry guest,
+deploys it, mints/checks the signer, opens the registry PDA, brings up
+nwaku + the batch-anchor watcher, and finally launches Basecamp with
+our modules loaded. The step-by-step that follows is what `run-app.sh`
+does on your behalf, broken out in case you want to drive a single
+piece manually.
 
 ### Prerequisites
 
@@ -147,9 +151,8 @@ single command run in order.
    [logos-whistleblower/README.md](logos-whistleblower/README.md) for
    loading the UI into Basecamp.
 
-A glue script that wraps steps 2–4 (plus the chronicle publish smoke
-to drive an end-to-end demo) is on the LP-17 punch list (S18) but
-deliberately not yet written.
+All of steps 2–5 above are bundled in `./scripts/run-app.sh` — clone
+the repo, start a sequencer, and one command takes it from there.
 
 ### E2E smoke tests (S18)
 
