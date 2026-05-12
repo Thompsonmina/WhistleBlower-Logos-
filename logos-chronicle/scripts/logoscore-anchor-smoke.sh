@@ -22,11 +22,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOGOSCORE="${LOGOSCORE:-/nix/store/bsr21sfvfasl686mfi08r53g68pvc4gk-logos-logoscore-cli-bin-0.1.0/bin/logoscore}"
 CHRONICLE_MODULES="${CHRONICLE_MODULES:-/tmp/chronicle-next-install/modules}"
 
-# Anchor config — all overridable.
-ANCHOR_PROGRAM_ID="${ANCHOR_PROGRAM_ID:-6ac5aa11b87bcd1961c7b5294b8d01e8746b2103e3beb665202a0299d2cf0252}"
+# program_id comes from integration-test.toml; everything else is shared
+# with production (sequencer, wallet, signer). Each can be overridden via
+# its ANCHOR_* env var.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/load-integration-config.sh"
+ANCHOR_PROGRAM_ID="${ANCHOR_PROGRAM_ID:-$IT_PROGRAM_ID}"
 ANCHOR_SEQUENCER_URL="${ANCHOR_SEQUENCER_URL:-http://127.0.0.1:3040}"
-ANCHOR_WALLET_HOME="${ANCHOR_WALLET_HOME:-$(cd "${ROOT}/.." && pwd)/.scaffold/wallet}"
-ANCHOR_SIGNER_ACCOUNT="${ANCHOR_SIGNER_ACCOUNT:-CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r}"
+ANCHOR_WALLET_HOME="${ANCHOR_WALLET_HOME:-$IT_REPO_ROOT/.scaffold/wallet}"
+ANCHOR_SIGNER_ACCOUNT="${ANCHOR_SIGNER_ACCOUNT:?ANCHOR_SIGNER_ACCOUNT must be set (no static default — base58 account_id from your wallet)}"
 FFI_LIB="${FFI_LIB:-}"
 
 RUN_DIR="${RUN_DIR:-/tmp/chronicle-anchor-smoke-$(date +%s)}"

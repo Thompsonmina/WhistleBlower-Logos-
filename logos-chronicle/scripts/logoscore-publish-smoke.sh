@@ -77,6 +77,11 @@ sleep 1
 "$LOGOSCORE" --config-dir "$LOG_DIR" call storage_module start >/dev/null
 "$LOGOSCORE" --config-dir "$LOG_DIR" load-module delivery_module >/dev/null
 "$LOGOSCORE" --config-dir "$LOG_DIR" load-module chronicle >/dev/null
+
+# Route this run's broadcasts onto the IT topic (see integration-test.toml).
+source "$(dirname "${BASH_SOURCE[0]}")/lib/load-integration-config.sh"
+"$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle setBroadcastTopic "$IT_TOPIC" >/dev/null
+
 # Pre-initialise delivery node (delivery_module.start() return shape is only
 # reliable when called synchronously from the logoscore CLI, not from an async
 # timer callback inside the module).

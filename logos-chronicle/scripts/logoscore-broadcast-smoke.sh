@@ -56,6 +56,11 @@ sleep 1
 "$LOGOSCORE" --config-dir "$LOG_DIR" load-module delivery_module >/dev/null
 "$LOGOSCORE" --config-dir "$LOG_DIR" load-module chronicle >/dev/null
 
+# Use the IT topic so smoke broadcasts never land on the production
+# /chronicle/1/... topic — guards against test traffic leaking to live consumers.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/load-integration-config.sh"
+"$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle setBroadcastTopic "$IT_TOPIC" >/dev/null
+
 "$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle startBroadcasterJson >/dev/null
 
 STAMP="$(date +%s)"
