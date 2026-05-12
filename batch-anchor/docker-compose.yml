@@ -20,8 +20,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8645:8645"   # REST API (loopback only)
-      - "60000:60000/tcp"       # libp2p
-      - "60000:60000/udp"
+      - "30303:30303/tcp"       # libp2p (60000 reserved on WSL; using 30303)
+      - "30303:30303/udp"
     volumes:
       - ./store:/store
     command:

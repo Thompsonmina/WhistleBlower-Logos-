@@ -32,6 +32,10 @@ pub struct RegistryConfig {
     pub sequencer_url: String,
     pub wallet_home: PathBuf,
     pub signer_account_id: String,
+    /// 64-char lowercase hex program ID, pinned to a deployed registry.
+    /// Passed to spel CLI via `-p <hex>` so the tool doesn't re-derive
+    /// it from a local guest binary on every call.
+    pub program_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +79,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("BATCH_ANCHOR_REGISTRY__SIGNER_ACCOUNT_ID") {
             self.registry.signer_account_id = v;
+        }
+        if let Ok(v) = std::env::var("BATCH_ANCHOR_REGISTRY__PROGRAM_ID") {
+            self.registry.program_id = v;
         }
         if let Ok(v) = std::env::var("BATCH_ANCHOR_BATCH__MAX_SIZE") {
             if let Ok(n) = v.parse() {

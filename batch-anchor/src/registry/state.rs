@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
+use toml::Value as TomlValue;
 use tracing::{debug, warn};
 
 use super::types::Registry;
@@ -22,10 +23,17 @@ pub struct RegistryClient {
     registry_dir: PathBuf,
     /// Prebuilt CLI binary path, absolute.
     registry_cli_bin: PathBuf,
+    /// IDL JSON path (absolute) — the spel CLI needs this whenever any
+    /// option flag is passed (it bypasses spel.toml auto-discovery in that mode).
+    idl_path: PathBuf,
     /// Public signer ID — needed for dry-run PDA derivation.
     signer_account_id: String,
     /// Wallet home dir, absolute.  Forwarded to every `lgs` invocation.
     wallet_home: PathBuf,
+    /// 64-char hex program ID — passed to spel CLI via `-p` so the tool
+    /// is pinned to a specific deployed registry and never re-derives it
+    /// from a local binary.
+    program_id: String,
 }
 
 #[derive(Deserialize)]
@@ -54,11 +62,36 @@ impl RegistryClient {
             .wallet_home
             .canonicalize()
             .with_context(|| format!("resolving registry.wallet_home: {}", cfg.wallet_home.display()))?;
+        let program_id = cfg.program_id.trim().to_string();
+        anyhow::ensure!(
+            program_id.len() == 64 && program_id.chars().all(|c| c.is_ascii_hexdigit()),
+            "registry.program_id must be 64 lowercase hex chars (got {} chars: {:?})",
+            program_id.len(),
+            program_id
+        );
+
+        // Parse spel.toml's [program] idl entry so we can pass --idl explicitly.
+        // The CLI requires this whenever any other flag is passed.
+        let spel_raw = std::fs::read_to_string(&spel_toml)
+            .with_context(|| format!("reading {}", spel_toml.display()))?;
+        let spel_doc: TomlValue = toml::from_str(&spel_raw)
+            .with_context(|| format!("parsing {}", spel_toml.display()))?;
+        let idl_rel = spel_doc
+            .get("program")
+            .and_then(|p| p.get("idl"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("{} missing [program].idl", spel_toml.display()))?;
+        let idl_path = registry_dir.join(idl_rel).canonicalize().with_context(|| {
+            format!("resolving IDL path {} (from {})", idl_rel, spel_toml.display())
+        })?;
+
         Ok(Self {
             registry_dir,
             registry_cli_bin,
+            idl_path,
             signer_account_id: cfg.signer_account_id.clone(),
             wallet_home,
+            program_id,
         })
     }
 
@@ -69,9 +102,25 @@ impl RegistryClient {
         cmd
     }
 
-    fn registry_cli(&self, args: &[&str]) -> Command {
+    /// Build a spel CLI invocation: `-i <idl> -p <hex> [opts...] -- <cmd> [args...]`.
+    ///
+    /// `opts` are spel-level OPTIONS that must appear *before* the `--`
+    /// separator (e.g. `--dry-run=text`).  `args` are the command name
+    /// plus its instruction-level args and go *after* the separator.
+    ///
+    /// Once any option is passed the spel CLI stops auto-discovering
+    /// spel.toml, so we always supply both `-i` and `-p` and the `--`.
+    fn registry_cli(&self, opts: &[&str], args: &[&str]) -> Command {
         let mut cmd = Command::new(&self.registry_cli_bin);
-        cmd.args(args)
+        cmd.arg("-i")
+            .arg(&self.idl_path)
+            .arg("-p")
+            .arg(&self.program_id);
+        for opt in opts {
+            cmd.arg(opt);
+        }
+        cmd.arg("--")
+            .args(args)
             .current_dir(&self.registry_dir)
             .env("NSSA_WALLET_HOME_DIR", &self.wallet_home);
         cmd
@@ -81,12 +130,10 @@ impl RegistryClient {
     /// The CLI prints a line like:  `PDA registry → <ADDRESS> [writable]`
     pub fn derive_pda(&self) -> Result<String> {
         let output = self
-            .registry_cli(&[
-                "--dry-run=text",
-                "init-registry",
-                "--anchorer",
-                &self.signer_account_id,
-            ])
+            .registry_cli(
+                &["--dry-run=text"],
+                &["init-registry", "--anchorer", &self.signer_account_id],
+            )
             .output()
             .context("running chronicle_registry_cli init-registry --dry-run")?;
 
@@ -201,11 +248,10 @@ impl RegistryClient {
         }
 
         let output = self
-            .registry_cli(&[
-                "init-registry",
-                "--anchorer",
-                &self.signer_account_id,
-            ])
+            .registry_cli(
+                &[],
+                &["init-registry", "--anchorer", &self.signer_account_id],
+            )
             .output()
             .context("running chronicle_registry_cli init-registry")?;
 
@@ -256,17 +302,20 @@ impl RegistryClient {
 
         debug!(count = entries.len(), "submitting index_batch");
         let output = self
-            .registry_cli(&[
-                "index-batch",
-                "--anchorer",
-                &self.signer_account_id,
-                "--cids",
-                &cids,
-                "--metadata-hashes",
-                &hashes,
-                "--anchor-timestamps",
-                &timestamps,
-            ])
+            .registry_cli(
+                &[],
+                &[
+                    "index-batch",
+                    "--anchorer",
+                    &self.signer_account_id,
+                    "--cids",
+                    &cids,
+                    "--metadata-hashes",
+                    &hashes,
+                    "--anchor-timestamps",
+                    &timestamps,
+                ],
+            )
             .output()
             .context("running chronicle_registry_cli index-batch")?;
 

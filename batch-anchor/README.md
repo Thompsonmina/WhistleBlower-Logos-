@@ -94,10 +94,11 @@ poll_ms              = 1000                                # relay-drain interva
 store_lookback_hours = 24                                  # store-protocol catch-up window (0 disables)
 
 [registry]
-spel_toml         = "../spel.toml"          # finds registry_dir, registry_cli_bin
+spel_toml         = "../spel.toml"          # finds registry_dir, registry_cli_bin, IDL
 sequencer_url     = "http://127.0.0.1:3040"
 wallet_home       = "../.scaffold/wallet"
 signer_account_id = "DkyMG8uaEJqv1A8at8b8cdktNeaaMhaWY57VETgEVaMX"
+program_id        = "6ac5aa11b87bcd1961c7b5294b8d01e8746b2103e3beb665202a0299d2cf0252"  # 64-char hex, pin to a deployed registry
 
 [batch]
 max_size      = 50    # MAX_BATCH from chronicle_registry_core; on-chain ceiling
@@ -124,9 +125,14 @@ From scratch:
 # 1. Make sure chronicle-registry is built and deployed (one-time).
 ( cd .. && make build deploy setup )
 
-# 2. Point batch-anchor.toml at the registry's signer.
+# 2. Point batch-anchor.toml at the registry's signer and program ID.
 SIGNER=$(grep SIGNER_ID ../.chronicle_registry-state | cut -d= -f2)
 sed -i "s/^signer_account_id = .*/signer_account_id = \"$SIGNER\"/" batch-anchor.toml
+# Capture the deployed program ID from a CLI dry-run (any instruction prints it).
+PROGRAM_ID=$(cd .. && ./target/debug/chronicle_registry_cli init-registry \
+              --anchorer "$SIGNER" --dry-run=text 2>&1 \
+              | awk '/^Program ID:/ {print $3}')
+sed -i "s/^program_id        = .*/program_id        = \"$PROGRAM_ID\"/" batch-anchor.toml
 
 # 3. Start the local nwaku node.
 cargo run -- node up
