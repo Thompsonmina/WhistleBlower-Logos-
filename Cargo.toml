@@ -7,5 +7,6 @@ members = [
 exclude = [
     "methods/guest",
     "batch-anchor",
+    "ffi",
 ]
 resolver = "2"
