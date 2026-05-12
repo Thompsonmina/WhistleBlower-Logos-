@@ -40,6 +40,23 @@ The crate has its own `[workspace]` declaration so the heavy LEZ dep tree
 (zk circuits, RISC-V VM, etc.) doesn't bleed into the repo's Cargo
 workspace; it's listed in the parent's `exclude` list.
 
+#### Distribution
+
+The flake ships a pre-built `libchronicle_registry_ffi.so` at
+`logos-chronicle/vendored/`, copied into the LGX during chronicle's
+`postInstall`. This is **x86_64-linux only** — the ELF was built against
+nix's glibc 2.40 and won't `dlopen` on macOS or aarch64. The flake's
+`systems` list includes more platforms, but `nix build` on those would
+produce a non-loadable LGX. Workarounds for other architectures:
+
+- Rebuild locally: `cd ffi && cargo build --release`, then copy
+  `ffi/target/release/libchronicle_registry_ffi.so` to
+  `logos-chronicle/vendored/` before `nix build .#chronicle-install`.
+  Prereqs: Rust ≥ 1.90, RISC-V toolchain (cargo handles), and the LEZ
+  proving keys at `~/.logos-blockchain-circuits` (one-time fetch).
+- Or set `CHRONICLE_REGISTRY_FFI_PATH` to your locally-built `.so` and
+  skip the vendored copy entirely.
+
 ### 2. `logos-chronicle/` — C++ glue
 
 - **`chronicle_anchor_client.{h,cpp}`** — a thin Qt class that dynamically
@@ -140,11 +157,4 @@ Override any defaults via env vars: `ANCHOR_PROGRAM_ID`,
 
 ---
 
-## What's NOT tested here
 
-The UI path. The UI calls the same `anchorBatchJson` underneath, but
-verifying the QML button states + per-row "Anchored ✓" / "Retry" badges
-under real on-chain timing is the next session's work. The synchronous
-nature of chronicle's current dispatch (1–3s per tx) means the QtRemoteObjects
-worker thread stalls during the call; replacing this with `QtConcurrent::run`
-+ `QFutureWatcher` (whisper-wall's pattern) is the planned phase 3.
