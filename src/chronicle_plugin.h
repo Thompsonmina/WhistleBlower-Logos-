@@ -67,6 +67,9 @@ public:
     Q_INVOKABLE QString listAnchorsJson() override;
     Q_INVOKABLE QString clearAnchorsJson() override;
 
+    Q_INVOKABLE QString initRegistryJson() override;
+    Q_INVOKABLE QString getRegistryJson() override;
+
 signals:
     void eventResponse(const QString& eventName, const QVariantList& args);
 

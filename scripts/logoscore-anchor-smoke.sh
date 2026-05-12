@@ -82,6 +82,7 @@ sleep 1
 "$LOGOSCORE" --config-dir "$LOG_DIR" load-module chronicle >/dev/null
 
 # ── Configure ───────────────────────────────────────────────────────────────
+# (config must be set before init/get can run — they read it from disk.)
 CONFIG_FILE="$RUN_DIR/anchor-config.json"
 cat >"$CONFIG_FILE" <<EOF
 {
@@ -100,6 +101,35 @@ assert r.get("ok") == True, f"setAnchorConfigJson failed: {r}"
 assert r.get("configured") == True, f"not configured after set: {r}"
 print("config saved")
 '
+
+# ── Ensure registry PDA is initialised ──────────────────────────────────────
+# getRegistry succeeds (with empty entries) once the PDA exists. If the
+# sequencer doesn't know the PDA, we run initRegistry once. Idempotency note:
+# the guest's #[account(init, ...)] errors if the PDA already exists, so we
+# only call init when getRegistry has actually failed.
+GET_RESULT="$("$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle getRegistryJson)"
+INIT_NEEDED="$(RESULT="$GET_RESULT" python3 -c '
+import json, os
+w = json.loads(os.environ["RESULT"])
+r = json.loads(w["result"])
+# get_registry returns ok=true even for empty/fresh PDAs. Failure means the
+# sequencer rejected get_account → PDA doesnt exist yet.
+print("no" if r.get("ok") is True else "yes")
+')"
+
+if [[ "$INIT_NEEDED" == "yes" ]]; then
+  echo "registry PDA not reachable yet — calling initRegistryJson"
+  INIT_RESULT="$("$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle initRegistryJson)"
+  RESULT="$INIT_RESULT" python3 -c '
+import json, os
+w = json.loads(os.environ["RESULT"])
+r = json.loads(w["result"])
+assert r.get("ok") is True, f"init_registry failed: {r}"
+print("initialized: tx_hash={}".format(r["tx_hash"][:16]))
+'
+else
+  echo "registry already initialised"
+fi
 
 # ── Anchor a synthetic CID ──────────────────────────────────────────────────
 STAMP="$(date +%s)"
@@ -142,6 +172,30 @@ rec = anchors[cid]
 assert rec["state"] == "confirmed", f"state not confirmed: {rec}"
 assert rec["tx_hash"], f"missing tx_hash in persisted record: {rec}"
 print("persisted: state={} tx_hash={}...".format(rec["state"], rec["tx_hash"][:16]))
+'
+
+# ── Verify the on-chain registry actually contains the entry ────────────────
+# Strongest proof: read the PDA back, borsh-decode, look for our CID +
+# metadata_hash. If this passes, the tx was applied — not just accepted.
+REG_RESULT="$("$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle getRegistryJson)"
+RESULT="$REG_RESULT" CID="$TEST_CID" HASH="$TEST_HASH" STAMP="$STAMP" python3 -c '
+import json, os
+w = json.loads(os.environ["RESULT"])
+r = json.loads(w["result"])
+assert r.get("ok") is True, f"getRegistryJson failed: {r}"
+entries = r.get("entries", {})
+cid  = os.environ["CID"]
+want_hash = os.environ["HASH"].lower()
+want_ts   = int(os.environ["STAMP"])
+assert cid in entries, (
+    "cid not in on-chain registry; got {} keys: {}".format(
+        len(entries), list(entries.keys())[:3]))
+rec = entries[cid]
+got_hash = rec.get("metadata_hash", "").lower()
+got_ts   = int(rec.get("anchor_timestamp", 0))
+assert got_hash == want_hash, f"metadata_hash mismatch: chain={got_hash} sent={want_hash}"
+assert got_ts == want_ts, f"anchor_timestamp mismatch: chain={got_ts} sent={want_ts}"
+print("on-chain: cid present, metadata_hash + anchor_timestamp match")
 '
 
 # ── Verify the local cache is used by lookupAnchorJson ──────────────────────

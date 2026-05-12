@@ -67,6 +67,12 @@ public:
     Q_INVOKABLE virtual QString lookupAnchorJson(const QString& cid) = 0;
     Q_INVOKABLE virtual QString listAnchorsJson() = 0;
     Q_INVOKABLE virtual QString clearAnchorsJson() = 0;
+
+    // Admin / verification — proxy straight through to the FFI. Used by
+    // smoke tests to prove the registry PDA actually contains a CID after
+    // anchorBatchJson, and to set up the PDA on first use.
+    Q_INVOKABLE virtual QString initRegistryJson() = 0;
+    Q_INVOKABLE virtual QString getRegistryJson() = 0;
 };
 
 #define ChronicleInterface_iid "org.logos.ChronicleInterface"

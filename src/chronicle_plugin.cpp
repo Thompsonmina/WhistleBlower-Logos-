@@ -1586,14 +1586,23 @@ QString ChroniclePlugin::anchorBatchJson(const QString& requestJson) {
         m_anchorClient = new ChronicleAnchorClient(this);
     }
 
-    // Compose the FFI request. The UI's `entries` shape (cid, metadata_hash,
-    // timestamp, optional publish_id) is already what the FFI expects.
+    // Compose the FFI request. Chronicle stores metadata_hash with a `v1:`
+    // version prefix; the FFI hex-decodes the field directly, so strip it.
+    QJsonArray ffiEntries;
+    for (const QJsonValue& v : entries) {
+        QJsonObject e = v.toObject();
+        QString h = e.value(QStringLiteral("metadata_hash")).toString();
+        if (h.startsWith(QStringLiteral("v1:"))) h.remove(0, 3);
+        e.insert(QStringLiteral("metadata_hash"), h);
+        ffiEntries.append(e);
+    }
+
     QJsonObject ffiArgs;
     ffiArgs.insert(QStringLiteral("program_id_hex"),  m_anchorConfig.programId);
     ffiArgs.insert(QStringLiteral("wallet_path"),     m_anchorConfig.walletHome);
     ffiArgs.insert(QStringLiteral("sequencer_url"),   m_anchorConfig.sequencerUrl);
     ffiArgs.insert(QStringLiteral("anchorer"),        m_anchorConfig.signerAccountId);
-    ffiArgs.insert(QStringLiteral("entries"),         entries);
+    ffiArgs.insert(QStringLiteral("entries"),         ffiEntries);
     const QString ffiArgsJson = QString::fromUtf8(
         QJsonDocument(ffiArgs).toJson(QJsonDocument::Compact));
 
@@ -1633,6 +1642,61 @@ QString ChroniclePlugin::anchorBatchJson(const QString& requestJson) {
     // Pass the FFI's response shape through; UI keys on `ok` and the
     // refreshed anchor map for everything else.
     return respJson;
+}
+
+QString ChroniclePlugin::initRegistryJson() {
+    if (!m_anchorConfigLoaded) {
+        m_anchorConfig = AnchorConfigStore::load();
+        m_anchorConfigLoaded = true;
+    }
+    const QStringList missing = m_anchorConfig.missingFields();
+    if (!missing.isEmpty()) {
+        QJsonArray arr;
+        for (const QString& f : missing) arr.append(f);
+        QJsonObject out;
+        out.insert(QStringLiteral("ok"), false);
+        out.insert(QStringLiteral("code"), QStringLiteral("ANCHOR_NOT_CONFIGURED"));
+        out.insert(QStringLiteral("error"),
+                   QStringLiteral("anchor settings incomplete; populate via setAnchorConfigJson"));
+        out.insert(QStringLiteral("missing_fields"), arr);
+        return compactJson(out);
+    }
+    if (m_anchorClient == nullptr) m_anchorClient = new ChronicleAnchorClient(this);
+
+    QJsonObject ffiArgs;
+    ffiArgs.insert(QStringLiteral("program_id_hex"), m_anchorConfig.programId);
+    ffiArgs.insert(QStringLiteral("wallet_path"),    m_anchorConfig.walletHome);
+    ffiArgs.insert(QStringLiteral("sequencer_url"),  m_anchorConfig.sequencerUrl);
+    ffiArgs.insert(QStringLiteral("anchorer"),       m_anchorConfig.signerAccountId);
+    return m_anchorClient->initRegistry(
+        QString::fromUtf8(QJsonDocument(ffiArgs).toJson(QJsonDocument::Compact)));
+}
+
+QString ChroniclePlugin::getRegistryJson() {
+    if (!m_anchorConfigLoaded) {
+        m_anchorConfig = AnchorConfigStore::load();
+        m_anchorConfigLoaded = true;
+    }
+    const QStringList missing = m_anchorConfig.missingFields();
+    if (!missing.isEmpty()) {
+        QJsonArray arr;
+        for (const QString& f : missing) arr.append(f);
+        QJsonObject out;
+        out.insert(QStringLiteral("ok"), false);
+        out.insert(QStringLiteral("code"), QStringLiteral("ANCHOR_NOT_CONFIGURED"));
+        out.insert(QStringLiteral("error"),
+                   QStringLiteral("anchor settings incomplete; populate via setAnchorConfigJson"));
+        out.insert(QStringLiteral("missing_fields"), arr);
+        return compactJson(out);
+    }
+    if (m_anchorClient == nullptr) m_anchorClient = new ChronicleAnchorClient(this);
+
+    QJsonObject ffiArgs;
+    ffiArgs.insert(QStringLiteral("program_id_hex"), m_anchorConfig.programId);
+    ffiArgs.insert(QStringLiteral("wallet_path"),    m_anchorConfig.walletHome);
+    ffiArgs.insert(QStringLiteral("sequencer_url"),  m_anchorConfig.sequencerUrl);
+    return m_anchorClient->getRegistry(
+        QString::fromUtf8(QJsonDocument(ffiArgs).toJson(QJsonDocument::Compact)));
 }
 
 QString ChroniclePlugin::anchorStatusJson(const QString& anchorId) {
