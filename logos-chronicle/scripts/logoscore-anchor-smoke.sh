@@ -177,27 +177,41 @@ print("persisted: state={} tx_hash={}...".format(rec["state"], rec["tx_hash"][:1
 
 # ── Verify the on-chain registry actually contains the entry ────────────────
 # Strongest proof: read the PDA back, borsh-decode, look for our CID +
-# metadata_hash. If this passes, the tx was applied — not just accepted.
-REG_RESULT="$("$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle getRegistryJson)"
-RESULT="$REG_RESULT" CID="$TEST_CID" HASH="$TEST_HASH" STAMP="$STAMP" python3 -c '
-import json, os
+# metadata_hash. Sequencer accepts → batches → applies → account updates,
+# so the just-anchored entry can take a few seconds to surface; poll.
+echo "polling on-chain registry for the new entry..."
+ON_CHAIN_OK=""
+for i in $(seq 1 30); do
+  REG_RESULT="$("$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle getRegistryJson)"
+  if RESULT="$REG_RESULT" CID="$TEST_CID" HASH="$TEST_HASH" STAMP="$STAMP" python3 -c '
+import json, os, sys
 w = json.loads(os.environ["RESULT"])
 r = json.loads(w["result"])
-assert r.get("ok") is True, f"getRegistryJson failed: {r}"
+if r.get("ok") is not True:
+    sys.exit(2)
 entries = r.get("entries", {})
-cid  = os.environ["CID"]
+cid = os.environ["CID"]
+if cid not in entries:
+    sys.exit(1)
+rec = entries[cid]
 want_hash = os.environ["HASH"].lower()
 want_ts   = int(os.environ["STAMP"])
-assert cid in entries, (
-    "cid not in on-chain registry; got {} keys: {}".format(
-        len(entries), list(entries.keys())[:3]))
-rec = entries[cid]
-got_hash = rec.get("metadata_hash", "").lower()
-got_ts   = int(rec.get("anchor_timestamp", 0))
+got_hash  = rec.get("metadata_hash", "").lower()
+got_ts    = int(rec.get("anchor_timestamp", 0))
 assert got_hash == want_hash, f"metadata_hash mismatch: chain={got_hash} sent={want_hash}"
 assert got_ts == want_ts, f"anchor_timestamp mismatch: chain={got_ts} sent={want_ts}"
-print("on-chain: cid present, metadata_hash + anchor_timestamp match")
-'
+print("on-chain: cid present (poll {}), metadata_hash + anchor_timestamp match".format(os.environ.get("POLL", "?")))
+' POLL="$i" 2>/dev/null; then
+    ON_CHAIN_OK="yes"
+    break
+  fi
+  sleep 2
+done
+if [[ -z "$ON_CHAIN_OK" ]]; then
+  echo "FAIL: $TEST_CID never appeared in on-chain registry after 60s" >&2
+  echo "Last response: $REG_RESULT" >&2
+  exit 1
+fi
 
 # ── Verify the local cache is used by lookupAnchorJson ──────────────────────
 LOOKUP_RESULT="$("$LOGOSCORE" --config-dir "$LOG_DIR" call chronicle lookupAnchorJson "$TEST_CID")"
