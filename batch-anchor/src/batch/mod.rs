@@ -107,7 +107,12 @@ mod tests {
     use std::collections::HashSet;
 
     fn env(cid: &str) -> Envelope {
-        Envelope { cid: cid.to_string(), metadata_hash: [0u8; 32], timestamp: 1 }
+        Envelope {
+            cid: cid.to_string(),
+            metadata_hash: [0u8; 32],
+            timestamp: 1,
+            metadata: serde_json::Value::Null,
+        }
     }
 
     #[test]

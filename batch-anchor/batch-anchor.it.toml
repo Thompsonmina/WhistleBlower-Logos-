@@ -1,0 +1,26 @@
+# Integration-test config for batch-anchor.
+#
+# Identical to batch-anchor.toml except for the content_topic — tests
+# publish on `/chronicle/it/...` so a production batch-anchor on
+# `/chronicle/1/...` doesn't see them.  Everything else (sequencer,
+# wallet, signer, program_id, nwaku endpoint) is shared with production.
+
+[delivery]
+rest_url             = "http://127.0.0.1:8645"
+content_topic        = "/chronicle/it/document-index/json"   # ← the only intentional diff vs production
+poll_ms              = 500
+store_lookback_hours = 1
+
+[registry]
+spel_toml         = "../spel.toml"
+sequencer_url     = "http://127.0.0.1:3040"
+wallet_home       = "../.scaffold/wallet"
+signer_account_id = "5FtdsuVcQVibkTUadtZXnD7e99LE61fpUsCoRXHvb9Q"
+program_id        = "6ac5aa11b87bcd1961c7b5294b8d01e8746b2103e3beb665202a0299d2cf0252"
+
+[batch]
+max_size      = 5    # tighter than prod (50) so tests exercise both flush triggers quickly
+flush_after_s = 5
+
+[node]
+compose_file = "docker-compose.yml"   # shared with production

@@ -10,7 +10,7 @@ store_lookback_hours = 24
 spel_toml         = "../spel.toml"
 sequencer_url     = "http://127.0.0.1:3040"
 wallet_home       = "../.scaffold/wallet"
-signer_account_id = "HzwmtcTKfwXGjPpUvDxg3GoqtGVSLpzPnbKw7kqz4TS3"
+signer_account_id = "5FtdsuVcQVibkTUadtZXnD7e99LE61fpUsCoRXHvb9Q"
 # 64-char hex program ID of the deployed chronicle-registry. Pinning this
 # means we don't recompute it from the guest binary on every CLI call —
 # the tool always submits to *this* registry, even if the local binary

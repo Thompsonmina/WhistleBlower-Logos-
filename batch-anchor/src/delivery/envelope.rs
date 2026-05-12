@@ -10,6 +10,11 @@ pub struct Envelope {
     /// Raw 32-byte metadata hash (decoded from the "v1:<hex>" wire string).
     pub metadata_hash: [u8; 32],
     pub timestamp: u64,
+    /// Full envelope JSON (every field the publisher sent — title,
+    /// content_type, size_bytes, tags, …).  Kept around for logging /
+    /// observability; the anchor itself only consumes cid, metadata_hash,
+    /// timestamp.
+    pub metadata: serde_json::Value,
 }
 
 /// Wire shape — only the fields chronicle-anchor cares about.
@@ -25,7 +30,14 @@ impl Envelope {
     /// Decode and validate a Waku message payload (base64-encoded JSON).
     pub fn from_payload(payload_b64: &str) -> Result<Self> {
         let bytes = B64.decode(payload_b64).context("base64 decode payload")?;
-        let raw: RawEnvelope = serde_json::from_slice(&bytes).context("JSON parse envelope")?;
+        // Parse twice: once into the strongly-typed RawEnvelope for the
+        // anchor-critical fields, once into a free-form serde_json::Value
+        // to retain every field the publisher sent (title, content_type,
+        // size_bytes, tags, ...) for logging / observability.
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&bytes).context("JSON parse envelope")?;
+        let raw: RawEnvelope =
+            serde_json::from_value(metadata.clone()).context("JSON parse envelope")?;
 
         if raw.v != 1 {
             bail!("unsupported envelope version: {}", raw.v);
@@ -40,7 +52,12 @@ impl Envelope {
         let metadata_hash = parse_metadata_hash(&raw.metadata_hash)
             .with_context(|| format!("invalid metadata_hash: {}", raw.metadata_hash))?;
 
-        Ok(Self { cid: raw.cid, metadata_hash, timestamp: raw.timestamp })
+        Ok(Self {
+            cid: raw.cid,
+            metadata_hash,
+            timestamp: raw.timestamp,
+            metadata,
+        })
     }
 
     /// metadata_hash as a lowercase hex string (for spel-cli wire format).

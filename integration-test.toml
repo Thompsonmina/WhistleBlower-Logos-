@@ -1,0 +1,19 @@
+# Integration-test contract.
+#
+# Minimal model: everything (sequencer, wallet, signer, nwaku, program ID)
+# is shared with production.  The only thing tests change is the **content
+# topic** they publish on.  A production batch-anchor subscribed to
+# `/chronicle/1/document-index/json` never sees `/chronicle/it/...`
+# envelopes, so test traffic and prod traffic don't mix.
+#
+# Trade-off: test entries land in the same on-chain registry PDA as
+# production entries.  They coexist (registry is a HashMap keyed on CID;
+# test CIDs are distinct from real ones) but the registry will grow over
+# time.  For LP-17 demo scope this is fine — we can grep test entries by
+# CID prefix or just wipe-and-redeploy chronicle-registry when needed.
+
+[topic]
+content = "/chronicle/it/document-index/json"
+
+[registry]
+program_id = "6ac5aa11b87bcd1961c7b5294b8d01e8746b2103e3beb665202a0299d2cf0252"

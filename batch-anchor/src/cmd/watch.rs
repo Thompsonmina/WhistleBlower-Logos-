@@ -91,6 +91,7 @@ pub async fn run(cfg: Config) -> Result<()> {
             info!(
                 cid = %env.cid,
                 metadata_hash = %env.metadata_hash_hex(),
+                metadata = %env.metadata,
                 "envelope received"
             );
             buffer.push(env);

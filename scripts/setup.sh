@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# Minimal bootstrap for the whistleblower workspace.  Idempotent.
+# Run after `lgs localnet start` and after the wallet at .scaffold/wallet
+# exists.  Handles the bits that need to happen on every fresh clone or
+# sequencer reset: build the guest, build the host-side binaries, deploy
+# the program, ensure the configured signer exists, open the registry.
+#
+#   1. Build the guest binary (risc0 docker build) if it isn't built yet.
+#   2. Build the host-side binaries (chronicle_registry_cli + batch-anchor)
+#      if they aren't built yet.  batch-anchor shells out to
+#      chronicle_registry_cli, and step 4 below invokes batch-anchor
+#      directly — so both must exist before we get there.
+#   3. Deploy chronicle-registry (idempotent on-chain: program_id is the
+#      binary hash, so re-deploying the same binary is a no-op).
+#   4. Mint a Public signer if the one pinned in batch-anchor.it.toml
+#      isn't in the wallet; rewrite the toml to point at the new ID.
+#   5. Call `batch-anchor init` to open the registry (idempotent).
+#
+# Assumes the LEZ sequencer is already running (port 3040) and docker
+# is up if you also want nwaku (`batch-anchor node up` is on you).
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+PROD_TOML="$REPO_ROOT/batch-anchor/batch-anchor.toml"
+IT_TOML="$REPO_ROOT/batch-anchor/batch-anchor.it.toml"
+WALLET_HOME="$REPO_ROOT/.scaffold/wallet"
+PROGRAM_BIN="$REPO_ROOT/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/chronicle_registry.bin"
+
+cd "$REPO_ROOT"
+
+CLI_BIN="$REPO_ROOT/target/debug/chronicle_registry_cli"
+ANCHOR_BIN="$REPO_ROOT/batch-anchor/target/debug/batch-anchor"
+
+# ── 1. Build guest if missing ─────────────────────────────────────────
+if [[ ! -f "$PROGRAM_BIN" ]]; then
+    echo "→ Build guest (cold; ~3 min)"
+    make build
+else
+    echo "→ Guest binary present, skipping build"
+fi
+
+# ── 2. Build host-side binaries if missing ────────────────────────────
+if [[ ! -x "$CLI_BIN" ]]; then
+    echo "→ Build chronicle_registry_cli"
+    cargo build --bin chronicle_registry_cli
+fi
+if [[ ! -x "$ANCHOR_BIN" ]]; then
+    echo "→ Build batch-anchor"
+    (cd "$REPO_ROOT/batch-anchor" && cargo build --bin batch-anchor)
+fi
+
+# ── 3. Deploy (idempotent — same binary hash = same program_id) ───────
+echo "→ Deploy chronicle-registry"
+NSSA_WALLET_HOME_DIR="$WALLET_HOME" make deploy >/dev/null
+
+# ── 4. Ensure the pinned signer exists in the wallet ──────────────────
+# Both batch-anchor.toml and batch-anchor.it.toml pin the same signer
+# (production and integration-test paths share the wallet + sequencer in
+# our simple model — only the topic differs).  On a fresh clone the
+# pinned ID isn't in the wallet, so mint a new Public and rewrite both
+# tomls.  If they already disagree, prod is authoritative.
+PINNED_SIGNER=$(grep -E '^signer_account_id' "$PROD_TOML" | sed -E 's/.*"([^"]+)".*/\1/')
+echo "→ Verify signer $PINNED_SIGNER"
+if NSSA_WALLET_HOME_DIR="$WALLET_HOME" lgs wallet -- account list 2>/dev/null \
+     | grep -qF "Public/$PINNED_SIGNER"; then
+    echo "  already in wallet"
+    # Sync the IT toml to prod in case they drifted.
+    sed -i.bak -E "s|^signer_account_id\s*=.*|signer_account_id = \"$PINNED_SIGNER\"|" "$IT_TOML"
+    rm -f "$IT_TOML.bak"
+else
+    echo "  not in wallet — minting a new one"
+    NEW_SIGNER=$(NSSA_WALLET_HOME_DIR="$WALLET_HOME" lgs wallet -- account new public 2>&1 \
+        | sed -n 's|.*Public/\([A-Za-z0-9]\{32,\}\).*|\1|p' | head -1)
+    [[ -n "$NEW_SIGNER" ]] || { echo "ERROR: could not mint signer" >&2; exit 1; }
+    echo "  minted $NEW_SIGNER → rewriting both batch-anchor tomls"
+    for toml in "$PROD_TOML" "$IT_TOML"; do
+        sed -i.bak -E "s|^signer_account_id\s*=.*|signer_account_id = \"$NEW_SIGNER\"|" "$toml"
+        rm -f "$toml.bak"
+    done
+fi
+
+# ── 5. Open the registry (idempotent) ─────────────────────────────────
+echo "→ Init registry"
+(cd "$REPO_ROOT/batch-anchor" && "$ANCHOR_BIN" -c batch-anchor.it.toml init)
+
+echo
+echo "✅ IT setup complete."
+echo "   run anchor:  cd batch-anchor && ./target/debug/batch-anchor -c batch-anchor.it.toml watch"
