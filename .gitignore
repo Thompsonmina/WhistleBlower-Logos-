@@ -8,3 +8,9 @@ methods/guest/target/
 # batch-anchor — sibling tool living under chronicle-registry/
 batch-anchor/target/
 batch-anchor/store/store.sqlite3*
+
+# Pre-built FFI .so vendored by `make ffi` — staged for chronicle's flake
+# postInstall. Binary; rebuilt from sources, not committed.
+logos-chronicle/vendored/*.so
+result
+result-*

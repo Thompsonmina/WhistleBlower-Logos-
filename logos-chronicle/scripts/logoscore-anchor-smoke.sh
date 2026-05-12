@@ -27,7 +27,7 @@ ANCHOR_PROGRAM_ID="${ANCHOR_PROGRAM_ID:-6ac5aa11b87bcd1961c7b5294b8d01e8746b2103
 ANCHOR_SEQUENCER_URL="${ANCHOR_SEQUENCER_URL:-http://127.0.0.1:3040}"
 ANCHOR_WALLET_HOME="${ANCHOR_WALLET_HOME:-$(cd "${ROOT}/.." && pwd)/.scaffold/wallet}"
 ANCHOR_SIGNER_ACCOUNT="${ANCHOR_SIGNER_ACCOUNT:-CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r}"
-FFI_LIB="${FFI_LIB:-$(cd "${ROOT}/.." && pwd)/ffi/target/release/libchronicle_registry_ffi.so}"
+FFI_LIB="${FFI_LIB:-}"
 
 RUN_DIR="${RUN_DIR:-/tmp/chronicle-anchor-smoke-$(date +%s)}"
 LOG_DIR="$RUN_DIR/logoscore"
@@ -51,7 +51,11 @@ cleanup_run() {
 trap cleanup_run EXIT INT TERM
 
 # ── Preflight ───────────────────────────────────────────────────────────────
-[[ ! -f "$FFI_LIB" ]] && { echo "FFI .so not found at $FFI_LIB" >&2; echo "Run: (from repo root) cd ffi && cargo build --release" >&2; exit 1; }
+# FFI resolution at runtime: env var override > plugin-dir sibling > LD search.
+# We only set CHRONICLE_REGISTRY_FFI_PATH below when $FFI_LIB is non-empty —
+# the default install bundles the .so next to chronicle_plugin.so, so the
+# plugin-dir fallback finds it without configuration.
+[[ -n "$FFI_LIB" && ! -f "$FFI_LIB" ]] && { echo "FFI_LIB set but .so not found at $FFI_LIB" >&2; exit 1; }
 [[ ! -d "$ANCHOR_WALLET_HOME" ]] && { echo "Wallet home not found at $ANCHOR_WALLET_HOME" >&2; exit 1; }
 [[ ! -d "$CHRONICLE_MODULES" ]] && { echo "Chronicle modules not found at $CHRONICLE_MODULES" >&2; echo "Run: nix build path:$ROOT#install --out-link /tmp/chronicle-next-install" >&2; exit 1; }
 
@@ -70,8 +74,11 @@ echo "  wallet_home  = $ANCHOR_WALLET_HOME"
 echo "  signer       = $ANCHOR_SIGNER_ACCOUNT"
 echo "  ffi_lib      = $FFI_LIB"
 
-# ── Start logoscore with FFI path in env ────────────────────────────────────
-CHRONICLE_REGISTRY_FFI_PATH="$FFI_LIB" "$LOGOSCORE" -D \
+# ── Start logoscore (FFI env var only if FFI_LIB explicitly set) ─────────────
+if [[ -n "$FFI_LIB" ]]; then
+  export CHRONICLE_REGISTRY_FFI_PATH="$FFI_LIB"
+fi
+"$LOGOSCORE" -D \
   --config-dir "$LOG_DIR" \
   --persistence-path "$PERSIST_DIR" \
   -m "$CHRONICLE_MODULES" \

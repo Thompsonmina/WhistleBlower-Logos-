@@ -1,9 +1,12 @@
 #include "chronicle_anchor_client.h"
 
 #include <QDebug>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcessEnvironment>
+
+#include <dlfcn.h>
 
 namespace {
 constexpr const char* kLibName     = "libchronicle_registry_ffi.so";
@@ -14,6 +17,21 @@ QString errJson(const QString& msg) {
     obj.insert(QStringLiteral("ok"), false);
     obj.insert(QStringLiteral("error"), msg);
     return QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+// Marker function whose address dladdr resolves back to chronicle's own
+// plugin .so — lets us find the install dir at runtime so we can look for
+// the FFI sibling there. Used by basecamp-installed chronicle (no env
+// var) to find `libchronicle_registry_ffi.so` next to `chronicle_plugin.so`.
+static void chronicle_anchor_client_marker() {}
+
+QString pluginOwnDir() {
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&chronicle_anchor_client_marker), &info)
+            && info.dli_fname != nullptr) {
+        return QFileInfo(QString::fromUtf8(info.dli_fname)).absolutePath();
+    }
+    return {};
 }
 } // namespace
 
@@ -26,9 +44,25 @@ ChronicleAnchorClient::~ChronicleAnchorClient() {
 bool ChronicleAnchorClient::ensureLoaded(QString* error) {
     if (m_loaded) return true;
 
+    // Resolution order:
+    //   1. CHRONICLE_REGISTRY_FFI_PATH env var — explicit override for dev /
+    //      smoke runs that point at a freshly-built .so.
+    //   2. Sibling of chronicle's own plugin .so — basecamp install layout,
+    //      where `lgpm install` puts the FFI next to chronicle_plugin.so.
+    //   3. QLibrary's default search (LD_LIBRARY_PATH, rpath, ldconfig cache).
     const QString override =
         QProcessEnvironment::systemEnvironment().value(QLatin1String(kEnvOverride));
-    const QString fileName = override.isEmpty() ? QString::fromLatin1(kLibName) : override;
+    QString fileName;
+    if (!override.isEmpty()) {
+        fileName = override;
+    } else {
+        const QString ownDir = pluginOwnDir();
+        if (!ownDir.isEmpty()) {
+            const QString candidate = ownDir + QStringLiteral("/") + QString::fromLatin1(kLibName);
+            if (QFileInfo::exists(candidate)) fileName = candidate;
+        }
+        if (fileName.isEmpty()) fileName = QString::fromLatin1(kLibName);
+    }
 
     m_lib.setFileName(fileName);
     if (!m_lib.load()) {

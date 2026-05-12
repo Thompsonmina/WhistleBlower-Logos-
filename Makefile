@@ -20,7 +20,10 @@ define save_var
 	@mv $(STATE_FILE).tmp $(STATE_FILE)
 endef
 
-.PHONY: help build idl cli deploy setup inspect status clean
+FFI_VENDORED := logos-chronicle/vendored/libchronicle_registry_ffi.so
+FFI_SRCS := $(shell find ffi/src chronicle_registry_core/src -name '*.rs' 2>/dev/null) ffi/Cargo.toml ffi/Cargo.lock chronicle_registry_core/Cargo.toml
+
+.PHONY: help build idl cli deploy setup inspect status clean ffi clean-ffi
 
 help: ## Show this help
 	@echo "chronicle-registry — SPEL Program"
@@ -82,3 +85,19 @@ status: ## Show saved state and binary info
 clean: ## Remove saved state
 	rm -f $(STATE_FILE) $(STATE_FILE).tmp
 	@echo "✅ State cleaned"
+
+ffi: $(FFI_VENDORED) ## Build the FFI cdylib and vendor it into logos-chronicle/
+$(FFI_VENDORED): $(FFI_SRCS)
+	cd ffi && cargo build --release
+	@mkdir -p $(dir $(FFI_VENDORED))
+	cp ffi/target/release/libchronicle_registry_ffi.so $(FFI_VENDORED)
+	@# Flakes only ingest git-tracked files. `add -fN` registers the
+	@# (gitignored) .so as intent-to-add so nix can see it without
+	@# actually staging the binary for commit.
+	@git add -fN $(FFI_VENDORED) 2>/dev/null || true
+	@echo "✅ Vendored FFI -> $(FFI_VENDORED)"
+	@ls -lh $(FFI_VENDORED)
+
+clean-ffi: ## Remove the vendored FFI and cargo target dir
+	rm -rf ffi/target $(FFI_VENDORED)
+	@echo "✅ FFI build artifacts cleaned"
