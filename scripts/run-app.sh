@@ -72,6 +72,13 @@ nix build "$BASECAMP_URL" -o /tmp/logos-basecamp
 # ── 4. Stage everything into the project-local data dir ─────────────────
 echo
 echo "▸ Step 4/6: stage modules into $DATA_DIR"
+# Wipe modules/ and plugins/ before re-staging. nix-store .so files
+# come with mode 0555, so a cp -rf rerun can't unlink them; just
+# clearing the dirs sidesteps the whole permissions dance. User state
+# (module_data/, logs/, chronicle/anchor-config.json) lives elsewhere
+# in $DATA_DIR and is preserved.
+chmod -R u+w "$DATA_DIR/modules" "$DATA_DIR/plugins" 2>/dev/null || true
+rm -rf "$DATA_DIR/modules" "$DATA_DIR/plugins"
 mkdir -p "$DATA_DIR/modules" "$DATA_DIR/plugins"
 cp -rf /tmp/storage-install/modules/.         "$DATA_DIR/modules/"
 cp -rf /tmp/delivery-install/modules/.        "$DATA_DIR/modules/"
@@ -115,9 +122,9 @@ echo "  anchor running in background → tail -f $ANCHOR_LOG"
 # ── 6. Launch ───────────────────────────────────────────────────────────
 echo
 echo "▸ Step 6/6: launch basecamp (data dir: $DATA_DIR)"
-# WSL/Linux without working Wayland → force xcb. Honor a pre-set
-# QT_QPA_PLATFORM so callers can override.
-if [[ -z "${QT_QPA_PLATFORM:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
-    export QT_QPA_PLATFORM=xcb
-fi
+# Force xcb by default. WSL sets WAYLAND_DISPLAY but Qt's wayland plugin
+# can't actually open a display there; native Linux desktops with working
+# Wayland still ship xcb as a fallback, so this is safe. Honor a pre-set
+# value so users on a real Wayland session can override.
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 exec /tmp/logos-basecamp/bin/LogosBasecamp --user-dir "$DATA_DIR" "$@"
