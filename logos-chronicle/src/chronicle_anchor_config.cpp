@@ -8,20 +8,16 @@
 
 namespace {
 constexpr const char* kDefaultSequencerUrl   = "http://127.0.0.1:3040";
-constexpr const char* kDefaultWalletHome     = "../.scaffold/wallet";
-// First public account from .scaffold/wallet/wallet_config.json's
-// initial_accounts list. Has a signing key in the wallet so the FFI can sign
-// transactions out of the box on the dev localnet.
-constexpr const char* kDefaultSignerAccount  = "CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r";
+constexpr const char* kDefaultWalletHome     = ".scaffold/wallet";
 }
 
 AnchorConfig AnchorConfig::withDevDefaults() {
     AnchorConfig c;
-    // program_id intentionally left empty — derived per-deployment from
-    // `spel deploy` output, no honest static default exists.
+    // program_id and signer_account_id intentionally left empty — both are
+    // wallet- and deployment-specific. The UI's AnchorConfigDialog prompts
+    // the user for them on first anchor attempt (missing_fields surfaces them).
     c.sequencerUrl    = QString::fromLatin1(kDefaultSequencerUrl);
     c.walletHome      = QString::fromLatin1(kDefaultWalletHome);
-    c.signerAccountId = QString::fromLatin1(kDefaultSignerAccount);
     return c;
 }
 
