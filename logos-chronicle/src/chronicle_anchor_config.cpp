@@ -9,7 +9,7 @@
 namespace {
 constexpr const char* kDefaultSequencerUrl   = "http://127.0.0.1:3040";
 constexpr const char* kDefaultWalletHome     = "../.scaffold/wallet";
-// First public account from chronicle-registry/.scaffold/wallet/wallet_config.json's
+// First public account from .scaffold/wallet/wallet_config.json's
 // initial_accounts list. Has a signing key in the wallet so the FFI can sign
 // transactions out of the box on the dev localnet.
 constexpr const char* kDefaultSignerAccount  = "CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r";

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # End-to-end smoke test for chronicle's on-chain anchor pipeline.
 #
-# Prerequisites:
-#   1. chronicle-registry/ffi/target/release/libchronicle_registry_ffi.so
-#      (cd chronicle-registry/ffi && cargo build --release)
-#   2. chronicle-registry deployed on a running localnet; ANCHOR_PROGRAM_ID
+# Prerequisites (paths relative to the repo root, which holds the registry
+# program/ffi alongside logos-chronicle/ after the LP-17 subtree merge):
+#   1. ffi/target/release/libchronicle_registry_ffi.so
+#      (from the repo root: cd ffi && cargo build --release)
+#   2. Registry program deployed on a running localnet; ANCHOR_PROGRAM_ID
 #      must point at the on-chain program id.
 #   3. A valid wallet at $ANCHOR_WALLET_HOME with the signer account known.
 #
@@ -24,9 +25,9 @@ CHRONICLE_MODULES="${CHRONICLE_MODULES:-/tmp/chronicle-next-install/modules}"
 # Anchor config — all overridable.
 ANCHOR_PROGRAM_ID="${ANCHOR_PROGRAM_ID:-6ac5aa11b87bcd1961c7b5294b8d01e8746b2103e3beb665202a0299d2cf0252}"
 ANCHOR_SEQUENCER_URL="${ANCHOR_SEQUENCER_URL:-http://127.0.0.1:3040}"
-ANCHOR_WALLET_HOME="${ANCHOR_WALLET_HOME:-$(cd "${ROOT}/../.." && pwd)/chronicle-registry/.scaffold/wallet}"
+ANCHOR_WALLET_HOME="${ANCHOR_WALLET_HOME:-$(cd "${ROOT}/.." && pwd)/.scaffold/wallet}"
 ANCHOR_SIGNER_ACCOUNT="${ANCHOR_SIGNER_ACCOUNT:-CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r}"
-FFI_LIB="${FFI_LIB:-$(cd "${ROOT}/../.." && pwd)/chronicle-registry/ffi/target/release/libchronicle_registry_ffi.so}"
+FFI_LIB="${FFI_LIB:-$(cd "${ROOT}/.." && pwd)/ffi/target/release/libchronicle_registry_ffi.so}"
 
 RUN_DIR="${RUN_DIR:-/tmp/chronicle-anchor-smoke-$(date +%s)}"
 LOG_DIR="$RUN_DIR/logoscore"
@@ -50,7 +51,7 @@ cleanup_run() {
 trap cleanup_run EXIT INT TERM
 
 # ── Preflight ───────────────────────────────────────────────────────────────
-[[ ! -f "$FFI_LIB" ]] && { echo "FFI .so not found at $FFI_LIB" >&2; echo "Run: cd chronicle-registry/ffi && cargo build --release" >&2; exit 1; }
+[[ ! -f "$FFI_LIB" ]] && { echo "FFI .so not found at $FFI_LIB" >&2; echo "Run: (from repo root) cd ffi && cargo build --release" >&2; exit 1; }
 [[ ! -d "$ANCHOR_WALLET_HOME" ]] && { echo "Wallet home not found at $ANCHOR_WALLET_HOME" >&2; exit 1; }
 [[ ! -d "$CHRONICLE_MODULES" ]] && { echo "Chronicle modules not found at $CHRONICLE_MODULES" >&2; echo "Run: nix build path:$ROOT#install --out-link /tmp/chronicle-next-install" >&2; exit 1; }
 
@@ -58,7 +59,7 @@ trap cleanup_run EXIT INT TERM
 # answer GET / so curl-based checks return 405/etc.
 if ! timeout 2 bash -c "</dev/tcp/$(echo "$ANCHOR_SEQUENCER_URL" | sed -E 's|^https?://||;s|/.*||;s|:|/|')" 2>/dev/null; then
   echo "Sequencer not reachable at $ANCHOR_SEQUENCER_URL" >&2
-  echo "Run: cd chronicle-registry && lgs localnet start" >&2
+  echo "Run: (from repo root) lgs localnet start" >&2
   exit 1
 fi
 

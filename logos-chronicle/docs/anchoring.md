@@ -9,9 +9,11 @@ end-to-end from the CLI.
 ## What's built
 
 A pipeline that lets chronicle submit a real on-chain transaction anchoring
-a batch of CIDs into the chronicle-registry account. Two repos, two pieces.
+a batch of CIDs into the chronicle-registry account. After the LP-17
+subtree merge, both pieces live in this repo: the Rust FFI under `ffi/`
+at the repo root, the C++ glue under `logos-chronicle/`.
 
-### 1. `chronicle-registry/ffi/` — Rust cdylib
+### 1. `ffi/` — Rust cdylib
 
 Small Rust crate (`chronicle_registry_ffi`) modelled on whisper-wall's
 `ui/ffi/`. Builds to `libchronicle_registry_ffi.so`. Exposes five
@@ -35,10 +37,10 @@ tag `v0.2.0-rc3` (matching the guest program) and uses
 `NSSA_SEQUENCER_URL`, set inline from the JSON args per call.
 
 The crate has its own `[workspace]` declaration so the heavy LEZ dep tree
-(zk circuits, RISC-V VM, etc.) doesn't bleed into chronicle-registry's
-parent workspace; it's listed in the parent's `exclude` list.
+(zk circuits, RISC-V VM, etc.) doesn't bleed into the repo's Cargo
+workspace; it's listed in the parent's `exclude` list.
 
-### 2. `scaffold-next/logos-chronicle/` — C++ glue
+### 2. `logos-chronicle/` — C++ glue
 
 - **`chronicle_anchor_client.{h,cpp}`** — a thin Qt class that dynamically
   loads the `.so` via `QLibrary`. Resolves all five symbols on first use,
@@ -52,7 +54,7 @@ parent workspace; it's listed in the parent's `exclude` list.
   terminal record per CID into the local anchor ledger — `confirmed` with
   the real `tx_hash` on success, `failed` with the FFI error otherwise.
 - **Default signer** is `CbgR6tj5kWx5oziiFptM7jMvrQeYY3Mzaao6ciuhSr2r` (the
-  first public account in `chronicle-registry/.scaffold/wallet/wallet_config.json`).
+  first public account in `.scaffold/wallet/wallet_config.json`).
   The earlier default from `batch-anchor.toml` wasn't actually in this wallet.
 
 ---
@@ -66,21 +68,21 @@ parent workspace; it's listed in the parent's `exclude` list.
 The script checks all of these and exits with a clear message if any are
 missing.
 
-1. **FFI built**: `chronicle-registry/ffi/target/release/libchronicle_registry_ffi.so`
+1. **FFI built**: `ffi/target/release/libchronicle_registry_ffi.so`
    exists. Built via:
    ```bash
-   cd chronicle-registry/ffi && cargo build --release
+   cd ffi && cargo build --release
    ```
 2. **Chronicle installed for logoscore**:
    `/tmp/chronicle-next-install/modules/chronicle/` exists. Built via:
    ```bash
-   cd scaffold-next/logos-chronicle && nix build path:.#install --out-link /tmp/chronicle-next-install
+   cd logos-chronicle && nix build path:.#install --out-link /tmp/chronicle-next-install
    ```
 3. **Sequencer reachable** at `127.0.0.1:3040`. Started via:
    ```bash
-   cd chronicle-registry && lgs localnet start
+   lgs localnet start
    ```
-4. **Wallet directory** exists at `chronicle-registry/.scaffold/wallet/`.
+4. **Wallet directory** exists at `.scaffold/wallet/`.
 5. **Deployed program_id** in env (defaults to the LP-17 dev deployment
    pinned in the script).
 

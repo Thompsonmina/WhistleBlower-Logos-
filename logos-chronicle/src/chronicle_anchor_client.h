@@ -5,7 +5,7 @@
 #include <QObject>
 #include <QString>
 
-// Loads chronicle_registry_ffi (built from chronicle-registry/ffi/) at runtime
+// Loads chronicle_registry_ffi (built from the repo-root `ffi/`) at runtime
 // via QLibrary and exposes its five C entry points as typed methods. All calls
 // are JSON-in / JSON-out and blocking; the FFI's tokio runtime handles its own
 // async beneath us.
