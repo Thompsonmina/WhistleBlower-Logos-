@@ -9,6 +9,7 @@
 #include <QStringList>
 #include <QVariantList>
 
+#include "chronicle_anchor_client.h"
 #include "chronicle_anchor_config.h"
 #include "chronicle_interface.h"
 #include "logos_api.h"
@@ -204,6 +205,7 @@ private:
     };
     QHash<QString, AnchorRecord> m_anchors;
     bool m_anchorsLoaded = false;
+    ChronicleAnchorClient* m_anchorClient = nullptr;
 
     QString anchorLedgerPath() const;
     void    loadAnchorLedger();

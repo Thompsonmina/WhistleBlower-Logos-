@@ -1553,11 +1553,6 @@ QString ChroniclePlugin::setAnchorConfigJson(const QString& cfgJson) {
     return compactJson(out);
 }
 
-namespace {
-constexpr const char* kAnchorNotImplMsg =
-    "on-chain anchor backend is stubbed (phase 1)";
-}
-
 QString ChroniclePlugin::anchorBatchJson(const QString& requestJson) {
     if (!m_anchorConfigLoaded) {
         m_anchorConfig = AnchorConfigStore::load();
@@ -1565,8 +1560,7 @@ QString ChroniclePlugin::anchorBatchJson(const QString& requestJson) {
     }
     if (!m_anchorsLoaded) loadAnchorLedger();
 
-    // Config check first — don't persist failed attempts that never reached
-    // the chain because the user hadn't filled settings.
+    // Don't even load the FFI for unconfigured attempts.
     const QStringList missing = m_anchorConfig.missingFields();
     if (!missing.isEmpty()) {
         QJsonArray arr;
@@ -1580,36 +1574,65 @@ QString ChroniclePlugin::anchorBatchJson(const QString& requestJson) {
         return compactJson(out);
     }
 
-    // Phase 1: this is where phase 2 will hand off to the real on-chain client.
-    // For now we record a terminal "failed" entry per CID so the UI "Retry"
-    // badges survive restarts. Phase 2's confirmed-state writes will overwrite
-    // these on the next click.
     const QJsonDocument reqDoc = QJsonDocument::fromJson(requestJson.toUtf8());
     const QJsonArray entries = reqDoc.object()
                                      .value(QStringLiteral("entries")).toArray();
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (entries.isEmpty()) {
+        return errorToJson(QStringLiteral("BAD_REQUEST"),
+                           QStringLiteral("entries array empty or missing"));
+    }
 
+    if (m_anchorClient == nullptr) {
+        m_anchorClient = new ChronicleAnchorClient(this);
+    }
+
+    // Compose the FFI request. The UI's `entries` shape (cid, metadata_hash,
+    // timestamp, optional publish_id) is already what the FFI expects.
+    QJsonObject ffiArgs;
+    ffiArgs.insert(QStringLiteral("program_id_hex"),  m_anchorConfig.programId);
+    ffiArgs.insert(QStringLiteral("wallet_path"),     m_anchorConfig.walletHome);
+    ffiArgs.insert(QStringLiteral("sequencer_url"),   m_anchorConfig.sequencerUrl);
+    ffiArgs.insert(QStringLiteral("anchorer"),        m_anchorConfig.signerAccountId);
+    ffiArgs.insert(QStringLiteral("entries"),         entries);
+    const QString ffiArgsJson = QString::fromUtf8(
+        QJsonDocument(ffiArgs).toJson(QJsonDocument::Compact));
+
+    // Synchronous — the FFI's tokio runtime handles its own internal async.
+    // Single CID per UI click takes ~1-3s against a local sequencer.
+    const QString respJson = m_anchorClient->indexBatch(ffiArgsJson);
+    const QJsonObject resp = QJsonDocument::fromJson(respJson.toUtf8()).object();
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const bool success = resp.value(QStringLiteral("ok")).toBool();
+    const QString txHash = resp.value(QStringLiteral("tx_hash")).toString();
+    const QString errorStr = resp.value(QStringLiteral("error")).toString();
+
+    // Persist a terminal record per CID — confirmed on success, failed otherwise.
     for (const QJsonValue& v : entries) {
         const QJsonObject e = v.toObject();
         AnchorRecord ar;
         ar.publishId     = e.value(QStringLiteral("publish_id")).toString();
         ar.cid           = e.value(QStringLiteral("cid")).toString();
         ar.metadataHash  = e.value(QStringLiteral("metadata_hash")).toString();
-        ar.state         = QStringLiteral("failed");
-        ar.code          = QStringLiteral("ANCHOR_NOT_IMPLEMENTED");
-        ar.error         = QString::fromLatin1(kAnchorNotImplMsg);
         ar.attemptedAtMs = now;
+        if (success) {
+            ar.state         = QStringLiteral("confirmed");
+            ar.txHash        = txHash;
+            ar.confirmedAtMs = now;
+        } else {
+            ar.state = QStringLiteral("failed");
+            ar.code  = QStringLiteral("ANCHOR_FAILED");
+            ar.error = errorStr;
+        }
         if (!ar.cid.isEmpty()) {
             m_anchors.insert(ar.cid, ar);
             persistAnchorRecord(ar);
         }
     }
 
-    QJsonObject out;
-    out.insert(QStringLiteral("ok"), false);
-    out.insert(QStringLiteral("code"), QStringLiteral("ANCHOR_NOT_IMPLEMENTED"));
-    out.insert(QStringLiteral("error"), QString::fromLatin1(kAnchorNotImplMsg));
-    return compactJson(out);
+    // Pass the FFI's response shape through; UI keys on `ok` and the
+    // refreshed anchor map for everything else.
+    return respJson;
 }
 
 QString ChroniclePlugin::anchorStatusJson(const QString& anchorId) {
