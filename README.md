@@ -41,7 +41,7 @@ deterministic across guest executions — required for risc0 proof determinism.
 | R5 — permissionless            | No `Pubkey` allow-list; signer can be anyone  |
 | R6 — LEZ program               | `#[lez_program]` guest binary                 |
 | R7 — devnet deploy             | `make deploy`                                 |
-| R8 — CU benchmarks             | (pending)                                     |
+| R8 — CU benchmarks             | see [Compute units](#compute-units) below     |
 | R9 — CI tests                  | `chronicle_registry_core` unit tests + CLI smokes |
 
 ## Capacity
@@ -62,6 +62,55 @@ So ~800 CIDs fit in one registry account at typical CIDv1 sizes. When that
 ceiling is approached, the recommended upgrade path is to add a second
 generation of registries (`[b"registry", version_u8]`) and have readers
 fall back to the previous generation if a CID isn't found in the current one.
+
+## Compute units
+
+LP-17 R8 — measured by instrumenting the guest with
+`risc0_zkvm::guest::env::cycle_count()` around each instruction body and
+emitting the delta via `env::log()`. The host (sequencer) prints each log
+to stdout prefixed with `R0VM[<cycle>]`. Numbers below are taken from
+sequencer stdout on a local LEZ devnet, on a fresh registry unless noted.
+
+**Baselines (registry empty before the call):**
+
+| Instruction          | n   | Cycles  | Cycles / CID |
+|----------------------|-----|---------|--------------|
+| `init_registry`      | —   | 414     | —            |
+| `index_batch`        | 1   | 2,240   | 2,240        |
+| `index_batch`        | 50  | 178,646 | 3,573        |
+
+Per-CID amortizes from 2,240 → 3,573 as `n` rises, because the fixed cost
+of Borsh-deserializing the empty map vanishes against the per-entry cost
+of inserting into and re-serializing the HashMap.
+
+**State-dependent growth.** The handler always Borsh-decodes the entire
+registry, mutates the `HashMap<String, CidRecord>`, and Borsh-encodes it
+back. Cost is therefore linear in `(registry_size_before + n)` once the
+map has appreciable content:
+
+| n   | Cycles  | Reg. size before → after |
+|-----|---------|--------------------------|
+| 1   | 2,240   | 0 → 1                    |
+| 10  | 30,027  | 1 → 11                   |
+| 25  | 128,931 | 11 → 36                  |
+| 50  | 288,149 | 36 → 86                  |
+
+Both readings for `index_batch n=50` are valid — the 178,646 is the cold
+single-batch cost, the 288,149 is what a real-world anchor would pay
+after the registry has accumulated ~36 entries. Operators should expect
+the cost to roughly double over the lifetime of one registry account
+(capped at ~800 CIDs by the 100 KiB account data limit).
+
+**Cycle budget.** NSSA caps per-tx public execution at
+`MAX_NUM_CYCLES_PUBLIC_EXECUTION = 32 Mi cycles` (32 × 1024²). The hot
+worst-case here (`n=50` near the account-data ceiling) is well under 1 Mi
+cycles — about 3% of the budget — so batching at the program's
+`MAX_BATCH = 50` is comfortable.
+
+**How to reproduce.** Start a local sequencer with stdout captured to a
+file, deploy the guest, init the registry, submit an `index_batch`, then
+`grep "CU " <seq.log>`. See the [LP-17 measurement script](../planning/chronicle-onchain-anchoring.md)
+for the exact sequence used above.
 
 ## Instructions
 

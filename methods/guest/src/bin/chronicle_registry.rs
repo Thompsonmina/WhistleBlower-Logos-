@@ -26,11 +26,14 @@ mod chronicle_registry {
         #[account(signer)]
         anchorer: AccountWithMetadata,
     ) -> SpelResult {
+        let cu_start = risc0_zkvm::guest::env::cycle_count();
         let empty = Registry::default();
         let bytes = borsh::to_vec(&empty)
             .map_err(|e| SpelError::SerializationError { message: e.to_string() })?;
         registry.account.data = Data::try_from(bytes)
             .map_err(|_| SpelError::custom(E_REGISTRY_FULL, "registry bytes overflow".to_string()))?;
+        let cu_end = risc0_zkvm::guest::env::cycle_count();
+        risc0_zkvm::guest::env::log(&format!("CU init_registry cycles={}", cu_end - cu_start));
         Ok(SpelOutput::execute(vec![registry, anchorer], vec![]))
     }
 
@@ -57,6 +60,7 @@ mod chronicle_registry {
         metadata_hashes: Vec<[u8; 32]>,
         anchor_timestamps: Vec<u32>,
     ) -> SpelResult {
+        let cu_start = risc0_zkvm::guest::env::cycle_count();
         // 1. Validate batch shape.
         let n = cids.len();
         if n == 0 {
@@ -124,6 +128,8 @@ mod chronicle_registry {
         registry.account.data = Data::try_from(bytes)
             .map_err(|_| SpelError::custom(E_REGISTRY_FULL, "registry would exceed 100 KiB".to_string()))?;
 
+        let cu_end = risc0_zkvm::guest::env::cycle_count();
+        risc0_zkvm::guest::env::log(&format!("CU index_batch n={} cycles={}", n, cu_end - cu_start));
         Ok(SpelOutput::execute(vec![registry, anchorer], vec![]))
     }
 }
