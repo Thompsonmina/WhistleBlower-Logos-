@@ -152,6 +152,15 @@ Rectangle {
                 pulse: !root.connected || !root.deliveryReady
                 Layout.alignment: Qt.AlignVCenter
             }
+            Comp.GhostButton {
+                theme: root.palette
+                text: "Anchor settings"
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: {
+                    anchorConfig.pendingPublishId = ""
+                    anchorConfig.open()
+                }
+            }
         }
 
         // ── Document form ────────────────────────────────────────────────────
