@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  build:
+    name: cargo build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            batch-anchor/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # Build the workspace + the excluded batch-anchor crate.
+      # The risc0 guest under methods/guest/ needs the risc0 toolchain and
+      # docker — too heavy for CI; smoke-built locally via `make build`.
+      - name: cargo build (workspace)
+        run: cargo build --workspace --bins
+
+      - name: cargo build (batch-anchor)
+        working-directory: batch-anchor
+        run: cargo build --bin batch-anchor
+
+      - name: cargo test (batch-anchor)
+        working-directory: batch-anchor
+        run: cargo test
+
+  fmt:
+    name: cargo fmt --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
