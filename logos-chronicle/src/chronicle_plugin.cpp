@@ -353,6 +353,7 @@ bool validateBroadcastEnvelope(const QString& envelopeJson,
 
 ChroniclePlugin::ChroniclePlugin() : QObject() {
     qRegisterMetaType<LogosResult>("LogosResult");
+    m_broadcastTopic = QString::fromLatin1(CHRONICLE_TOPIC);
     qDebug() << "ChroniclePlugin: created";
 }
 
@@ -728,7 +729,7 @@ QString ChroniclePlugin::startBroadcasterJson() {
 
     QJsonObject out;
     out.insert(QStringLiteral("started"), true);
-    out.insert(QStringLiteral("topic"), QString::fromLatin1(CHRONICLE_TOPIC));
+    out.insert(QStringLiteral("topic"), m_broadcastTopic);
     return okJson(out);
 }
 
@@ -771,7 +772,7 @@ QString ChroniclePlugin::broadcastEnvelopeJson(const QString& envelopeJson) {
     PendingBroadcast pending;
     pending.broadcastId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     pending.status = QStringLiteral("queued");
-    pending.topic = QString::fromLatin1(CHRONICLE_TOPIC);
+    pending.topic = m_broadcastTopic;
     pending.cid = cid;
     pending.metadataHash = metadataHash;
     pending.dedupeKey = dedupeKey;
@@ -817,7 +818,7 @@ void ChroniclePlugin::startBroadcastSend(const QString& broadcastId) {
     const QString payload = compactJson(it->envelope);
     qDebug() << "ChroniclePlugin: delivery send started"
              << "broadcast_id" << broadcastId
-             << "topic" << QString::fromLatin1(CHRONICLE_TOPIC)
+             << "topic" << m_broadcastTopic
              << "payload_bytes" << payload.toUtf8().size();
 
     it->status = QStringLiteral("sent");
@@ -833,7 +834,7 @@ void ChroniclePlugin::startBroadcastSend(const QString& broadcastId) {
     m_deliveryClient->invokeRemoteMethodAsync(
         QStringLiteral("delivery_module"),
         QStringLiteral("send"),
-        QString::fromLatin1(CHRONICLE_TOPIC),
+        m_broadcastTopic,
         payload,
         [](QVariant) {},
         Timeout(120000));
@@ -1699,6 +1700,23 @@ QString ChroniclePlugin::getRegistryJson() {
         QString::fromUtf8(QJsonDocument(ffiArgs).toJson(QJsonDocument::Compact)));
 }
 
+QString ChroniclePlugin::setBroadcastTopic(const QString& topic) {
+    m_broadcastTopic = topic.isEmpty()
+        ? QString::fromLatin1(CHRONICLE_TOPIC)
+        : topic;
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("topic"), m_broadcastTopic);
+    return compactJson(out);
+}
+
+QString ChroniclePlugin::getBroadcastTopic() {
+    QJsonObject out;
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("topic"), m_broadcastTopic);
+    return compactJson(out);
+}
+
 QString ChroniclePlugin::anchorStatusJson(const QString& anchorId) {
     // Phase 1 never hands out an anchor_id — anchorBatchJson is synchronous,
     // its result is the terminal state. Phase 2 will populate an in-flight
@@ -1897,7 +1915,7 @@ void ChroniclePlugin::advancePublishAfterUpload(const QString& publishId) {
     broadcast.broadcastId =
         QUuid::createUuid().toString(QUuid::WithoutBraces);
     broadcast.status = QStringLiteral("queued");
-    broadcast.topic = QString::fromLatin1(CHRONICLE_TOPIC);
+    broadcast.topic = m_broadcastTopic;
     broadcast.cid = pub->cid;
     broadcast.metadataHash = pub->metadataHash;
     broadcast.dedupeKey = dedupeKey;

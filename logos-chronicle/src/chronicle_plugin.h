@@ -70,6 +70,15 @@ public:
     Q_INVOKABLE QString initRegistryJson() override;
     Q_INVOKABLE QString getRegistryJson() override;
 
+    // Test-only knob: override the delivery topic used for broadcasts.
+    // Intentionally not in chronicle_interface.h — the UI's auto-generated
+    // proxy doesn't see this method, so production callers can't change the
+    // topic. Smoke tests use it for run-isolation (each run picks its own
+    // topic so concurrent runs don't cross-contaminate). Pass empty to reset
+    // to the compile-time default.
+    Q_INVOKABLE QString setBroadcastTopic(const QString& topic);
+    Q_INVOKABLE QString getBroadcastTopic();
+
 signals:
     void eventResponse(const QString& eventName, const QVariantList& args);
 
@@ -193,6 +202,10 @@ private:
     // ── Anchor config (phase 1 — see chronicle_anchor_config.h) ─────────────
     AnchorConfig m_anchorConfig;
     bool m_anchorConfigLoaded = false;
+
+    // Effective broadcast topic. Defaults to CHRONICLE_TOPIC; overridable
+    // by smoke tests via setBroadcastTopic.
+    QString m_broadcastTopic;
 
     // ── Anchor ledger (persisted state, source of truth for the UI) ─────────
     struct AnchorRecord {
