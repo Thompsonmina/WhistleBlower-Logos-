@@ -16,3 +16,7 @@ batch-anchor/store/store.sqlite3*
 
 result
 result-*
+
+# Project-local basecamp data dir created by scripts/run-app.sh
+# (plugins, modules, module_data, logs). Treat as build output.
+.basecamp-data/
