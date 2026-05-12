@@ -1,5 +1,6 @@
 #include "whistleblower_plugin.h"
 
+#include <QDateTime>
 #include <QDebug>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -224,9 +225,9 @@ void WhistleblowerPlugin::anchorPublished(QString publishId) {
 
     const QString cid   = record.value(QStringLiteral("cid")).toString();
     const QString mhash = record.value(QStringLiteral("metadata_hash")).toString();
-    // Convert ms → s for the on-chain u32 timestamp field.
-    const qint64 tsMs   = record.value(QStringLiteral("created_at_ms")).toVariant().toLongLong();
-    const qint64 tsSec  = tsMs > 0 ? tsMs / 1000 : 0;
+    // Per LP-17, `anchor_timestamp` is "when this was anchored", not when the
+    // document was published. Stamp it at click time, in seconds.
+    const qint64 tsSec = QDateTime::currentSecsSinceEpoch();
 
     QJsonObject entry;
     entry.insert(QStringLiteral("publish_id"), publishId);

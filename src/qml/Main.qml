@@ -11,6 +11,9 @@ import "components" as Comp
 Rectangle {
     id: root
     color: theme.bg
+    // Exposed so Repeater delegates can reference the theme without their
+    // own `theme:` binding shadowing the outer id.
+    readonly property var palette: theme
 
     // ── Backend wiring ───────────────────────────────────────────────────────
     readonly property var backend: logos.module("whistleblower")
@@ -397,7 +400,7 @@ Rectangle {
                             }
                             Comp.GhostButton {
                                 visible: modelData.status === "broadcast_sent"
-                                theme: theme
+                                theme: root.palette
                                 text: root.anchorButtonLabel(modelData.cid)
                                 enabled: {
                                     var s = root.anchorStateFor(modelData.cid)
