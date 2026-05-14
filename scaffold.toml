@@ -7,7 +7,7 @@ pin = "cf3639d8252040d13b3d4e933feb19b42c76e14a"
 
 [repos.spel]
 source = "https://github.com/Thompsonmina/spel.git"
-pin = "c7db270"
+pin = "c7db27014137fbdcf08b6bc39acc2545e3a5159c"
 
 [repos.basecamp]
 source = "https://github.com/logos-co/logos-basecamp.git"

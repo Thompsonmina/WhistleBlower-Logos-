@@ -1,7 +1,7 @@
 # Whistleblower
 
 A censorship-resistant document upload + indexing pipeline for the Logos
-stack — the reference implementation of [LP-17](../LP_17).  Anyone can
+stack — the reference implementation of LP-17.  Anyone can
 upload a document, have its content-identifier (CID) broadcast peer-to-peer
 in real time, and optionally anchor that CID on-chain so it remains
 discoverable indefinitely without a trusted host.
@@ -88,6 +88,7 @@ landed in this repo; pending rows are tracked in [/planning](../planning).
 | S15 | E2E integration tests in CI | _pending_ — IT contract sketched in [`integration-test.toml`](integration-test.toml) |
 | S17 | Top-level README | this file |
 | S18 | Reproducible E2E demo script with `RISC0_DEV_MODE=0` | [scripts/run-app.sh](scripts/run-app.sh) + chronicle smokes on the IT topic — [see below](#e2e-demo-s18) |
+| S19 | Narrated video demo | [demo.mp4](https://github.com/Thompsonmina/WhistleBlower-Logos-/releases/download/demo-v1/demo.mp4) — script at [`docs/demo-script.md`](docs/demo-script.md) |
 | SUB | MIT + Apache-2.0 license files | [LICENSE-MIT](LICENSE-MIT) + [LICENSE-APACHE](LICENSE-APACHE) |
 
 ### Anchoring approach — why LEZ over zone-SDK (F5b)

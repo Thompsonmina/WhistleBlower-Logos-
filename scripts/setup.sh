@@ -6,19 +6,22 @@
 # host-side binaries, deploy the program, ensure the configured signer
 # exists, open the registry.
 #
-#   1. Ensure the LEZ sequencer is running on 127.0.0.1:3040 — start
+#   1. Run `lgs setup` — initialises the local lgs config that
+#      `localnet start`, `wallet`, and `deploy` all depend on.
+#      Idempotent: re-runs are a no-op on a configured machine.
+#   2. Ensure the LEZ sequencer is running on 127.0.0.1:3040 — start
 #      it via `lgs localnet start` if nothing is listening.
-#   2. Build the guest binary (risc0 docker build) if it isn't built yet.
-#   3. Build the host-side binaries (chronicle_registry_cli + batch-anchor)
+#   3. Build the guest binary (risc0 docker build) if it isn't built yet.
+#   4. Build the host-side binaries (chronicle_registry_cli + batch-anchor)
 #      if they aren't built yet.  batch-anchor shells out to
-#      chronicle_registry_cli, and step 5 below invokes batch-anchor
+#      chronicle_registry_cli, and step 6 below invokes batch-anchor
 #      directly — so both must exist before we get there.
-#   4. Deploy chronicle-registry (idempotent on-chain: program_id is the
+#   5. Deploy chronicle-registry (idempotent on-chain: program_id is the
 #      binary hash, so re-deploying the same binary is a no-op).
-#   5. Mint a Public signer if the one pinned in batch-anchor.toml
+#   6. Mint a Public signer if the one pinned in batch-anchor.toml
 #      isn't in the wallet; rewrite both batch-anchor.{,it.}toml to
 #      point at the new ID.
-#   6. Call `batch-anchor init` to open the registry (idempotent).
+#   7. Call `batch-anchor init` to open the registry (idempotent).
 #
 # Assumes the LEZ sequencer is already running (port 3040) and docker
 # is up if you also want nwaku (`batch-anchor node up` is on you).
@@ -37,7 +40,13 @@ cd "$REPO_ROOT"
 CLI_BIN="$REPO_ROOT/target/debug/chronicle_registry_cli"
 ANCHOR_BIN="$REPO_ROOT/batch-anchor/target/debug/batch-anchor"
 
-# ── 1. Ensure sequencer is up ─────────────────────────────────────────
+# ── 1. Initialise lgs config ──────────────────────────────────────────
+# Required on a fresh machine before localnet / wallet / deploy will
+# work.  Idempotent on already-configured installs.
+echo "→ lgs setup"
+lgs setup
+
+# ── 2. Ensure sequencer is up ─────────────────────────────────────────
 # Probe port 3040 — start lgs localnet if nothing answers.  lgs's start
 # command is idempotent (it noops if a sequencer is already running),
 # but probing first lets us skip the spawn cost on hot runs.
@@ -49,7 +58,7 @@ else
     echo "→ Sequencer already running on 127.0.0.1:3040"
 fi
 
-# ── 2. Build guest if missing ─────────────────────────────────────────
+# ── 3. Build guest if missing ─────────────────────────────────────────
 if [[ ! -f "$PROGRAM_BIN" ]]; then
     echo "→ Build guest (cold; ~3 min)"
     make build
@@ -57,7 +66,7 @@ else
     echo "→ Guest binary present, skipping build"
 fi
 
-# ── 3. Build host-side binaries if missing ────────────────────────────
+# ── 4. Build host-side binaries if missing ────────────────────────────
 if [[ ! -x "$CLI_BIN" ]]; then
     echo "→ Build chronicle_registry_cli"
     cargo build --bin chronicle_registry_cli
@@ -67,11 +76,11 @@ if [[ ! -x "$ANCHOR_BIN" ]]; then
     (cd "$REPO_ROOT/batch-anchor" && cargo build --bin batch-anchor)
 fi
 
-# ── 4. Deploy (idempotent — same binary hash = same program_id) ───────
+# ── 5. Deploy (idempotent — same binary hash = same program_id) ───────
 echo "→ Deploy chronicle-registry"
 NSSA_WALLET_HOME_DIR="$WALLET_HOME" make deploy >/dev/null
 
-# ── 5. Ensure the pinned signer exists in the wallet ──────────────────
+# ── 6. Ensure the pinned signer exists in the wallet ──────────────────
 # Both batch-anchor.toml and batch-anchor.it.toml pin the same signer
 # (production and integration-test paths share the wallet + sequencer in
 # our simple model — only the topic differs).  On a fresh clone the
@@ -97,7 +106,7 @@ else
     done
 fi
 
-# ── 6. Open the registry (idempotent) ─────────────────────────────────
+# ── 7. Open the registry (idempotent) ─────────────────────────────────
 echo "→ Init registry"
 (cd "$REPO_ROOT/batch-anchor" && "$ANCHOR_BIN" -c batch-anchor.it.toml init)
 
