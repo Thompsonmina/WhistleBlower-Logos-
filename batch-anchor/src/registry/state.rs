@@ -43,13 +43,17 @@ struct AccountGetOutput {
 
 impl RegistryClient {
     pub fn new(cfg: &RegistryConfig) -> Result<Self> {
-        let spel_toml = cfg
-            .spel_toml
-            .canonicalize()
-            .with_context(|| format!("resolving registry.spel_toml: {}", cfg.spel_toml.display()))?;
+        let spel_toml = cfg.spel_toml.canonicalize().with_context(|| {
+            format!("resolving registry.spel_toml: {}", cfg.spel_toml.display())
+        })?;
         let registry_dir = spel_toml
             .parent()
-            .ok_or_else(|| anyhow!("registry.spel_toml has no parent dir: {}", spel_toml.display()))?
+            .ok_or_else(|| {
+                anyhow!(
+                    "registry.spel_toml has no parent dir: {}",
+                    spel_toml.display()
+                )
+            })?
             .to_path_buf();
         let registry_cli_bin = registry_dir.join("target/debug/chronicle_registry_cli");
         if !registry_cli_bin.exists() {
@@ -58,10 +62,12 @@ impl RegistryClient {
                 registry_cli_bin.display()
             );
         }
-        let wallet_home = cfg
-            .wallet_home
-            .canonicalize()
-            .with_context(|| format!("resolving registry.wallet_home: {}", cfg.wallet_home.display()))?;
+        let wallet_home = cfg.wallet_home.canonicalize().with_context(|| {
+            format!(
+                "resolving registry.wallet_home: {}",
+                cfg.wallet_home.display()
+            )
+        })?;
         let program_id = cfg.program_id.trim().to_string();
         anyhow::ensure!(
             program_id.len() == 64 && program_id.chars().all(|c| c.is_ascii_hexdigit()),
@@ -82,7 +88,11 @@ impl RegistryClient {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("{} missing [program].idl", spel_toml.display()))?;
         let idl_path = registry_dir.join(idl_rel).canonicalize().with_context(|| {
-            format!("resolving IDL path {} (from {})", idl_rel, spel_toml.display())
+            format!(
+                "resolving IDL path {} (from {})",
+                idl_rel,
+                spel_toml.display()
+            )
         })?;
 
         Ok(Self {
@@ -356,7 +366,9 @@ mod tests {
     #[test]
     fn parses_pda_line_with_unicode_arrow() {
         assert_eq!(
-            parse_pda_line("  PDA registry → HwzZhhEXX6dT6PRjP4ufNRuR5hnEHxv1PXLFn7JHhtgs [writable]"),
+            parse_pda_line(
+                "  PDA registry → HwzZhhEXX6dT6PRjP4ufNRuR5hnEHxv1PXLFn7JHhtgs [writable]"
+            ),
             Some("HwzZhhEXX6dT6PRjP4ufNRuR5hnEHxv1PXLFn7JHhtgs".into())
         );
     }

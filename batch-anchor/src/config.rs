@@ -48,8 +48,8 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("reading config {}", path.display()))?;
-        let mut cfg: Config = toml::from_str(&raw)
-            .with_context(|| format!("parsing config {}", path.display()))?;
+        let mut cfg: Config =
+            toml::from_str(&raw).with_context(|| format!("parsing config {}", path.display()))?;
         cfg.apply_env();
         Ok(cfg)
     }

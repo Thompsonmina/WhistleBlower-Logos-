@@ -23,7 +23,9 @@ mod tests {
 
     #[test]
     fn empty_registry_roundtrips() {
-        let reg = Registry { entries: HashMap::new() };
+        let reg = Registry {
+            entries: HashMap::new(),
+        };
         let bytes = borsh::to_vec(&reg).unwrap();
         let decoded = Registry::try_from_slice(&bytes).unwrap();
         assert_eq!(decoded.entries.len(), 0);

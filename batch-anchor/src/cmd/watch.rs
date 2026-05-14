@@ -52,7 +52,10 @@ pub async fn run(cfg: Config) -> Result<()> {
             "Catching up via store-protocol (last {}h) ...",
             cfg.delivery.store_lookback_hours
         );
-        match delivery.query_store(&cfg.delivery.content_topic, start_ns).await {
+        match delivery
+            .query_store(&cfg.delivery.content_topic, start_ns)
+            .await
+        {
             Ok(envelopes) => {
                 let mut new = 0usize;
                 let total = envelopes.len();
@@ -74,7 +77,10 @@ pub async fn run(cfg: Config) -> Result<()> {
 
     delivery.subscribe(&cfg.delivery.content_topic).await?;
     info!("Subscribed to {}", cfg.delivery.content_topic);
-    info!("Polling every {}ms — send broadcasts now ...", cfg.delivery.poll_ms);
+    info!(
+        "Polling every {}ms — send broadcasts now ...",
+        cfg.delivery.poll_ms
+    );
 
     loop {
         tokio::time::sleep(Duration::from_millis(cfg.delivery.poll_ms)).await;

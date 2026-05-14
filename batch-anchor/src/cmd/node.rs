@@ -57,7 +57,11 @@ fn compose(compose_file: &Path, args: &[&str]) -> Result<()> {
         .status()
         .context("running `docker compose` — is docker installed and on $PATH?")?;
     if !status.success() {
-        anyhow::bail!("`docker compose {}` failed: exit {}", args.join(" "), status);
+        anyhow::bail!(
+            "`docker compose {}` failed: exit {}",
+            args.join(" "),
+            status
+        );
     }
     Ok(())
 }

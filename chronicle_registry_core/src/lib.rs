@@ -19,7 +19,9 @@ pub const MAX_BATCH: usize = 50;
 /// Per LP-17, the registry stores `(CID, metadata_hash, anchor_timestamp)`
 /// per document. The CID itself is the map key in `Registry.entries`;
 /// we add `anchored_by` for audit and `version` for envelope evolution.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
 pub struct CidRecord {
     pub metadata_hash: [u8; 32],
     pub anchor_timestamp: i64,
@@ -38,9 +40,9 @@ pub struct Registry {
 // ── Error codes (numbered, dist-x style) ─────────────────────────────────
 // Used with `SpelError::custom(code, msg)` inside the guest program.
 
-pub const E_INVALID_HASH: u32 = 1;     // cid is empty, or metadata_hash is all-zero
-pub const E_BAD_TIMESTAMP: u32 = 2;    // anchor_timestamp == 0
-pub const E_BATCH_EMPTY: u32 = 3;      // index_batch called with 0 records
-pub const E_BATCH_TOO_BIG: u32 = 4;    // batch size > MAX_BATCH
-pub const E_REGISTRY_FULL: u32 = 5;    // appending would exceed 100 KiB account cap
-pub const E_ARITY_MISMATCH: u32 = 8;   // parallel vec lengths don't match
+pub const E_INVALID_HASH: u32 = 1; // cid is empty, or metadata_hash is all-zero
+pub const E_BAD_TIMESTAMP: u32 = 2; // anchor_timestamp == 0
+pub const E_BATCH_EMPTY: u32 = 3; // index_batch called with 0 records
+pub const E_BATCH_TOO_BIG: u32 = 4; // batch size > MAX_BATCH
+pub const E_REGISTRY_FULL: u32 = 5; // appending would exceed 100 KiB account cap
+pub const E_ARITY_MISMATCH: u32 = 8; // parallel vec lengths don't match

@@ -5,6 +5,25 @@ on:
     branches: [master, main]
   pull_request:
 
+# What this workflow covers (and doesn't):
+#
+#   ✓ chronicle_registry_core — pure Rust shared types. Builds in <2 min.
+#   ✓ batch-anchor — the off-chain CID watcher / on-chain anchoring CLI.
+#                    Builds and runs unit tests.
+#   ✓ rustfmt for both crate trees.
+#
+#   ✗ examples/    — depends on spel-framework + nssa_core, which pull in
+#                    logos-blockchain-pol. That crate's build.rs needs the
+#                    LOGOS_BLOCKCHAIN_CIRCUITS artifact bundle (multi-GB,
+#                    not on a fresh runner). Built locally via cargo.
+#   ✗ methods/guest — risc0 zkVM guest. Needs the risc0 toolchain + docker.
+#                     Built locally via `make build`.
+#   ✗ ffi/         — chronicle FFI .so. Same LEZ-deps issue as examples/.
+#                    Built locally via `make ffi`; binary committed under
+#                    logos-chronicle/vendored/.
+#   ✗ nix flake    — exercised via `./scripts/run-app.sh` and the
+#                    `nix run .#smoke-*` apps locally.
+
 jobs:
   build:
     name: cargo build + test
@@ -26,11 +45,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      # Build the workspace + the excluded batch-anchor crate.
-      # The risc0 guest under methods/guest/ needs the risc0 toolchain and
-      # docker — too heavy for CI; smoke-built locally via `make build`.
-      - name: cargo build (workspace)
-        run: cargo build --workspace --bins
+      - name: cargo build (chronicle_registry_core)
+        run: cargo build -p chronicle_registry_core
 
       - name: cargo build (batch-anchor)
         working-directory: batch-anchor
@@ -48,4 +64,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --all -- --check
+      - name: fmt (chronicle-registry workspace)
+        run: cargo fmt --all -- --check
+      - name: fmt (batch-anchor)
+        working-directory: batch-anchor
+        run: cargo fmt --all -- --check

@@ -71,8 +71,8 @@ fn parse_metadata_hash(s: &str) -> Result<[u8; 32]> {
     let hex_part = s
         .strip_prefix("v1:")
         .with_context(|| format!("expected \"v1:\" prefix, got: {s}"))?;
-    let bytes = hex::decode(hex_part)
-        .with_context(|| format!("hex decode failed for: {hex_part}"))?;
+    let bytes =
+        hex::decode(hex_part).with_context(|| format!("hex decode failed for: {hex_part}"))?;
     bytes
         .try_into()
         .map_err(|v: Vec<u8>| anyhow::anyhow!("expected 32 bytes, got {}", v.len()))

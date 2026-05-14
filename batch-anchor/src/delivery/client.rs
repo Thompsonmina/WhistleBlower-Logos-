@@ -119,7 +119,12 @@ impl DeliveryClient {
                 url.push_str(c);
             }
 
-            let resp = self.http.get(&url).send().await.context("GET /store/v3/messages")?;
+            let resp = self
+                .http
+                .get(&url)
+                .send()
+                .await
+                .context("GET /store/v3/messages")?;
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
